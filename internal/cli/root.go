@@ -142,6 +142,7 @@ func init() {
 	RootCmd.AddCommand(replicationCmd)
 	RootCmd.AddCommand(databasesCmd)
 	RootCmd.AddCommand(indexesCmd)
+	RootCmd.AddCommand(xidCmd)
 	RootCmd.AddCommand(configCmd)
 	RootCmd.AddCommand(rulesCmd)
 	RootCmd.AddCommand(versionCmd)

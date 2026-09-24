@@ -16,6 +16,8 @@ var (
 	flagLagWarn          time.Duration
 	flagLagCrit          time.Duration
 	flagUnusedIndexBytes int64
+	flagXIDWarnAge       int64
+	flagXIDCritAge       int64
 )
 
 const (
@@ -26,6 +28,8 @@ const (
 	thresholdLagWarn            = "lag-threshold"
 	thresholdLagCrit            = "lag-critical"
 	thresholdUnusedIndexMinSize = "unused-min-size"
+	thresholdXIDWarnAge         = "warn-age"
+	thresholdXIDCritAge         = "crit-age"
 )
 
 // addThresholds registers the requested threshold flags on a command.
@@ -47,6 +51,10 @@ func addThresholds(cmd *cobra.Command, names ...string) {
 			f.DurationVar(&flagLagCrit, thresholdLagCrit, 0, "Critical when replica replay lag exceeds this duration (e.g. 120s)")
 		case thresholdUnusedIndexMinSize:
 			f.Int64Var(&flagUnusedIndexBytes, thresholdUnusedIndexMinSize, 0, "Minimum index size in bytes to flag as unused (default 10485760 / 10MB)")
+		case thresholdXIDWarnAge:
+			f.Int64Var(&flagXIDWarnAge, thresholdXIDWarnAge, 0, "Warn when database or table XID age exceeds this number (default 200000000 / 200M)")
+		case thresholdXIDCritAge:
+			f.Int64Var(&flagXIDCritAge, thresholdXIDCritAge, 0, "Critical when database XID age exceeds this number (default 1500000000 / 1.5B)")
 		}
 	}
 }
@@ -75,6 +83,12 @@ func resolveThresholds(cmd *cobra.Command) evaluator.Thresholds {
 	}
 	if f.Changed(thresholdUnusedIndexMinSize) && flagUnusedIndexBytes > 0 {
 		th.UnusedIndexMinSize = flagUnusedIndexBytes
+	}
+	if f.Changed(thresholdXIDWarnAge) && flagXIDWarnAge > 0 {
+		th.XIDWarnAge = flagXIDWarnAge
+	}
+	if f.Changed(thresholdXIDCritAge) && flagXIDCritAge > 0 {
+		th.XIDCritAge = flagXIDCritAge
 	}
 	return th
 }

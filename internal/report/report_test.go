@@ -178,4 +178,38 @@ func TestHumanIndexes(t *testing.T) {
 	}
 }
 
+func TestHumanXID(t *testing.T) {
+	r := sampleReport()
+	r.Command = "xid"
+	r.Data = XIDData{
+		XID: model.XIDReport{
+			AutovacuumFreezeMaxAge: 200000000,
+			Databases: []model.DatabaseXIDInfo{
+				{Datname: "postgres", Age: 1500000, RemainingXIDs: 2145983647, PercentWraparound: 0.1},
+				{Datname: "app_prod", Age: 250000000, RemainingXIDs: 1897483647, PercentWraparound: 11.6},
+			},
+			OldestTables: []model.TableXIDInfo{
+				{Schema: "public", Table: "events", Age: 250000000, SizeBytes: 1073741824},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Human(&buf, r, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Transaction ID (XID) & Wraparound") {
+		t.Errorf("output missing XID header:\n%s", out)
+	}
+	if !strings.Contains(out, "postgres") || !strings.Contains(out, "app_prod") {
+		t.Errorf("output missing database names:\n%s", out)
+	}
+	if !strings.Contains(out, "Oldest tables (freeze horizon):") || !strings.Contains(out, "events") {
+		t.Errorf("output missing oldest tables section:\n%s", out)
+	}
+	if !strings.Contains(out, "1.0 GiB") {
+		t.Errorf("output missing table human size:\n%s", out)
+	}
+}
+
 var _ = Options{} // Options is a value type used above

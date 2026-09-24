@@ -328,3 +328,98 @@ func TestEvaluateIndexes(t *testing.T) {
 		t.Error("expected IDX-003 inventory finding")
 	}
 }
+
+func TestEvaluateXID(t *testing.T) {
+	th := DefaultThresholds() // XIDWarnAge = 200M, XIDCritAge = 1.5B
+
+	// 1. Empty report
+	emptyFs := EvaluateXID(model.XIDReport{}, th)
+	if len(emptyFs) != 1 || emptyFs[0].ID != "XID-004" || emptyFs[0].Severity != model.SeverityInfo {
+		t.Fatalf("unexpected empty report findings: %+v", emptyFs)
+	}
+
+	// 2. Healthy databases & tables -> PASS
+	healthy := model.XIDReport{
+		AutovacuumFreezeMaxAge: 200000000,
+		Databases: []model.DatabaseXIDInfo{
+			{Datname: "postgres", Age: 1500000, RemainingXIDs: 2145983647, PercentWraparound: 0.07},
+			{Datname: "app_prod", Age: 50000000, RemainingXIDs: 2097483647, PercentWraparound: 2.33},
+		},
+		OldestTables: []model.TableXIDInfo{
+			{Schema: "public", Table: "users", Age: 50000000, SizeBytes: 104857600},
+		},
+	}
+	healthyFs := EvaluateXID(healthy, th)
+	if len(healthyFs) != 1 || healthyFs[0].ID != "XID-004" || healthyFs[0].Severity != model.SeverityPass {
+		t.Fatalf("expected PASS finding for healthy XID, got: %+v", healthyFs)
+	}
+
+	// 3. Database warning + table warning
+	warnReport := model.XIDReport{
+		AutovacuumFreezeMaxAge: 200000000,
+		Databases: []model.DatabaseXIDInfo{
+			{Datname: "app_prod", Age: 250000000, RemainingXIDs: 1897483647, PercentWraparound: 11.64},
+		},
+		OldestTables: []model.TableXIDInfo{
+			{Schema: "public", Table: "events", Age: 250000000, SizeBytes: 524288000},
+			{Schema: "public", Table: "users", Age: 50000000, SizeBytes: 104857600},
+		},
+	}
+	warnFs := EvaluateXID(warnReport, th)
+	var hasDbWarn, hasTblWarn, hasInventory bool
+	for _, f := range warnFs {
+		switch f.ID {
+		case "XID-002":
+			hasDbWarn = true
+			if f.Severity != model.SeverityWarning {
+				t.Errorf("XID-002 should be WARNING, got %s", f.Severity)
+			}
+		case "XID-003":
+			hasTblWarn = true
+			if f.Severity != model.SeverityWarning {
+				t.Errorf("XID-003 should be WARNING, got %s", f.Severity)
+			}
+			if !strings.Contains(f.Recommendation, "VACUUM (FREEZE, VERBOSE)") {
+				t.Errorf("recommendation should mention VACUUM FREEZE: %q", f.Recommendation)
+			}
+		case "XID-004":
+			hasInventory = true
+			if f.Severity != model.SeverityInfo {
+				t.Errorf("inventory with issues should be INFO, got %s", f.Severity)
+			}
+		}
+	}
+	if !hasDbWarn {
+		t.Error("expected XID-002 finding for database exceeding freeze threshold")
+	}
+	if !hasTblWarn {
+		t.Error("expected XID-003 finding for table exceeding freeze threshold")
+	}
+	if !hasInventory {
+		t.Error("expected XID-004 finding")
+	}
+
+	// 4. Critical wraparound danger
+	critReport := model.XIDReport{
+		AutovacuumFreezeMaxAge: 200000000,
+		Databases: []model.DatabaseXIDInfo{
+			{Datname: "legacy_db", Age: 1600000000, RemainingXIDs: 547483647, PercentWraparound: 74.51},
+		},
+	}
+	critFs := EvaluateXID(critReport, th)
+	var hasCrit bool
+	for _, f := range critFs {
+		if f.ID == "XID-001" {
+			hasCrit = true
+			if f.Severity != model.SeverityCritical {
+				t.Errorf("XID-001 should be CRITICAL, got %s", f.Severity)
+			}
+			if !strings.Contains(f.Recommendation, "Run manual VACUUM FREEZE") {
+				t.Errorf("recommendation should urge manual vacuum freeze: %q", f.Recommendation)
+			}
+		}
+	}
+	if !hasCrit {
+		t.Error("expected XID-001 finding for critical wraparound risk")
+	}
+}

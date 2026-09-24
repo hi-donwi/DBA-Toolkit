@@ -373,6 +373,19 @@ const (
 		"FROM pg_stat_user_indexes s " +
 		"JOIN pg_index i ON s.indexrelid = i.indexrelid " +
 		"ORDER BY 4 DESC, 3 ASC"
+	freezeAgeQuery = "SELECT setting::bigint FROM pg_settings WHERE name = 'autovacuum_freeze_max_age'"
+	xidDbQuery     = "SELECT datname, age(datfrozenxid)::bigint " +
+		"FROM pg_database WHERE NOT datistemplate " +
+		"ORDER BY 2 DESC, 1 ASC"
+	xidTablesQuery = "SELECT COALESCE(n.nspname, ''), COALESCE(c.relname, ''), age(c.relfrozenxid)::bigint, " +
+		"COALESCE(pg_total_relation_size(c.oid), 0)::bigint " +
+		"FROM pg_class c " +
+		"JOIN pg_namespace n ON n.oid = c.relnamespace " +
+		"WHERE c.relkind IN ('r', 't', 'm') " +
+		"AND n.nspname NOT IN ('pg_catalog', 'information_schema') " +
+		"AND n.nspname !~ '^pg_temp' " +
+		"ORDER BY 3 DESC, 2 ASC " +
+		"LIMIT $1"
 )
 
 func TestCollectorIndexes(t *testing.T) {
@@ -403,5 +416,50 @@ func TestCollectorIndexes(t *testing.T) {
 	}
 	if got[2].Index != "idx_items_invalid" || got[2].IsValid {
 		t.Errorf("got[2] mismatch (expected invalid): %+v", got[2])
+	}
+}
+
+func TestCollectorXID(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			freezeAgeQuery: {int64(200000000)},
+		},
+		query: map[string]fakeRows{
+			xidDbQuery: {
+				rows: []fakeRow{
+					{"app_prod", int64(250000000)},
+					{"postgres", int64(1500000)},
+				},
+			},
+			xidTablesQuery: {
+				rows: []fakeRow{
+					{"public", "events", int64(250000000), int64(1048576000)},
+					{"public", "users", int64(50000000), int64(104857600)},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.XID(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.AutovacuumFreezeMaxAge != 200000000 {
+		t.Errorf("AutovacuumFreezeMaxAge got %d, want 200000000", got.AutovacuumFreezeMaxAge)
+	}
+	if len(got.Databases) != 2 {
+		t.Fatalf("expected 2 databases, got %d", len(got.Databases))
+	}
+	if got.Databases[0].Datname != "app_prod" || got.Databases[0].Age != 250000000 {
+		t.Errorf("Databases[0] mismatch: %+v", got.Databases[0])
+	}
+	if got.Databases[0].RemainingXIDs != 2147483647-250000000 {
+		t.Errorf("Databases[0].RemainingXIDs got %d", got.Databases[0].RemainingXIDs)
+	}
+	if len(got.OldestTables) != 2 {
+		t.Fatalf("expected 2 tables, got %d", len(got.OldestTables))
+	}
+	if got.OldestTables[0].Table != "events" || got.OldestTables[0].Age != 250000000 {
+		t.Errorf("OldestTables[0] mismatch: %+v", got.OldestTables[0])
 	}
 }

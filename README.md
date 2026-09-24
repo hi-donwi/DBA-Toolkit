@@ -40,6 +40,7 @@ dbakit locks                  # blocked sessions and who is blocking them
 dbakit replication            # role and replica replay lag
 dbakit databases              # size, owner, and connection count per database
 dbakit indexes                # user indexes with size, scans, and validity
+dbakit xid                    # transaction ID age, autovacuum freeze horizon & wraparound
 dbakit config                 # a small set of configuration settings
 dbakit rules                  # the compiled-in rule catalog
 ```
@@ -70,6 +71,7 @@ individual settings.
 | `replication` | `repl` | Role (primary/standby) and replay lag per connected replica |
 | `databases` | `dbs` | Per-database size, owner, and connection count |
 | `indexes` | `idx`, `index` | User indexes with size, scan count, and validity |
+| `xid` | `wraparound`, `freeze`, `vacuum` | Transaction ID (XID) age, wraparound headroom, and oldest tables |
 | `config` | | `max_connections`, buffers, WAL level, slow-statement logging, and more |
 | `rules` | | The compiled-in rule catalog (ID, group, title) |
 | `version` | | Version, commit, and build time |
@@ -92,7 +94,7 @@ reading table data (which dbakit does not) is a separate, stricter grant.
 
 ## Thresholds
 
-Long-query, lock, replication, and index rules take thresholds; health uses connection
+Long-query, lock, replication, index, and XID rules take thresholds; health uses connection
 usage percentages.
 
 ```sh
@@ -102,10 +104,12 @@ dbakit diagnose \
   --lock-wait-threshold 30s \
   --lag-threshold 60s --lag-critical 180s
 dbakit indexes --unused-min-size 10485760
+dbakit xid --warn-age 200000000 --crit-age 1500000000 --top-tables 10
 ```
 
 Defaults: connection usage warn 80% / critical 95%, long queries 60s, lock
-wait 5s, replay lag warn 30s / critical 120s, unused index min size 10MB.
+wait 5s, replay lag warn 30s / critical 120s, unused index min size 10MB,
+XID age warn 200,000,000 (200M, matches default `autovacuum_freeze_max_age`) / critical 1,500,000,000 (1.5B).
 
 ## Output
 
@@ -119,7 +123,7 @@ Configurable worldwide flags:
 - `--timeout` — per-command connection/session timeout (default 15s).
 
 Findings carry a severity (`CRITICAL`, `WARNING`, `INFO`, `PASS`), a stable
-rule ID (e.g. `CONN-001`, `LONGQ-001`, `LOCK-001`, `REPL-002`, `IDX-001`, `IDX-002`), a summary,
+rule ID (e.g. `CONN-001`, `LONGQ-001`, `LOCK-001`, `REPL-002`, `IDX-001`, `IDX-002`, `XID-001`, `XID-002`, `XID-003`), a summary,
 evidence, and a recommendation.
 
 ### Exit codes

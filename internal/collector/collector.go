@@ -290,3 +290,64 @@ func (c *Collector) Indexes(ctx context.Context) ([]model.IndexInfo, error) {
 	}
 	return out, rows.Err()
 }
+
+// XID collects transaction ID age and wraparound risk for databases and oldest tables.
+func (c *Collector) XID(ctx context.Context, topTablesLimit int) (model.XIDReport, error) {
+	var rep model.XIDReport
+	rep.AutovacuumFreezeMaxAge = 200000000 // default fallback
+	_ = c.q.QueryRow(ctx, "SELECT setting::bigint FROM pg_settings WHERE name = 'autovacuum_freeze_max_age'", nil, &rep.AutovacuumFreezeMaxAge)
+
+	dbRows, err := c.q.Query(ctx,
+		"SELECT datname, age(datfrozenxid)::bigint "+
+			"FROM pg_database WHERE NOT datistemplate "+
+			"ORDER BY 2 DESC, 1 ASC")
+	if err != nil {
+		return rep, err
+	}
+	defer dbRows.Close()
+
+	rep.Databases = make([]model.DatabaseXIDInfo, 0)
+	for dbRows.Next() {
+		var d model.DatabaseXIDInfo
+		if err := dbRows.Scan(&d.Datname, &d.Age); err != nil {
+			return rep, err
+		}
+		d.RemainingXIDs = 2147483647 - d.Age
+		if d.Age > 0 {
+			d.PercentWraparound = (float64(d.Age) / 2147483647.0) * 100.0
+		}
+		rep.Databases = append(rep.Databases, d)
+	}
+	if err := dbRows.Err(); err != nil {
+		return rep, err
+	}
+
+	if topTablesLimit <= 0 {
+		topTablesLimit = 10
+	}
+
+	tblRows, err := c.q.Query(ctx,
+		"SELECT COALESCE(n.nspname, ''), COALESCE(c.relname, ''), age(c.relfrozenxid)::bigint, "+
+			"COALESCE(pg_total_relation_size(c.oid), 0)::bigint "+
+			"FROM pg_class c "+
+			"JOIN pg_namespace n ON n.oid = c.relnamespace "+
+			"WHERE c.relkind IN ('r', 't', 'm') "+
+			"AND n.nspname NOT IN ('pg_catalog', 'information_schema') "+
+			"AND n.nspname !~ '^pg_temp' "+
+			"ORDER BY 3 DESC, 2 ASC "+
+			"LIMIT $1", topTablesLimit)
+	if err != nil {
+		return rep, err
+	}
+	defer tblRows.Close()
+
+	rep.OldestTables = make([]model.TableXIDInfo, 0)
+	for tblRows.Next() {
+		var t model.TableXIDInfo
+		if err := tblRows.Scan(&t.Schema, &t.Table, &t.Age, &t.SizeBytes); err != nil {
+			return rep, err
+		}
+		rep.OldestTables = append(rep.OldestTables, t)
+	}
+	return rep, tblRows.Err()
+}

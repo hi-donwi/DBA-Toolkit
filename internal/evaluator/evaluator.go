@@ -32,6 +32,10 @@ var Rules = []Rule{
 	{ID: "IDX-001", Title: "Unused index", Group: "indexes"},
 	{ID: "IDX-002", Title: "Invalid index", Group: "indexes"},
 	{ID: "IDX-003", Title: "Index inventory", Group: "indexes"},
+	{ID: "XID-001", Title: "Emergency transaction ID wraparound risk", Group: "xid"},
+	{ID: "XID-002", Title: "Autovacuum freeze age threshold", Group: "xid"},
+	{ID: "XID-003", Title: "Oldest table freeze horizon", Group: "xid"},
+	{ID: "XID-004", Title: "Transaction ID inventory", Group: "xid"},
 	{ID: "CFG-001", Title: "Configuration setting", Group: "configuration"},
 	{ID: "CFG-WAL-LEVEL", Title: "WAL level", Group: "configuration"},
 	{ID: "CFG-LOG-DURATION", Title: "Slow-statement logging", Group: "configuration"},
@@ -47,6 +51,8 @@ type Thresholds struct {
 	ReplLagWarn          time.Duration // 30s: warn above replay lag
 	ReplLagCrit          time.Duration // 120s: critical above replay lag
 	UnusedIndexMinSize   int64         // 10MB: minimum index size to flag as unused
+	XIDWarnAge           int64         // 200,000,000: warn above transaction ID age
+	XIDCritAge           int64         // 1,500,000,000: critical above transaction ID age
 }
 
 // DefaultThresholds returns the MVP defaults.
@@ -59,6 +65,8 @@ func DefaultThresholds() Thresholds {
 		ReplLagWarn:          30 * time.Second,
 		ReplLagCrit:          2 * time.Minute,
 		UnusedIndexMinSize:   10 * 1024 * 1024,
+		XIDWarnAge:           200_000_000,
+		XIDCritAge:           1_500_000_000,
 	}
 }
 

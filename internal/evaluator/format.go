@@ -43,3 +43,28 @@ func fmtBytes(n int64) string {
 	}
 	return fmt.Sprintf("%.1f %s", f, units[i])
 }
+
+// fmtNum renders an integer with comma thousands separators.
+func fmtNum(n int64) string {
+	sign := ""
+	if n < 0 {
+		sign = "-"
+		n = -n
+	}
+	in := fmt.Sprintf("%d", n)
+	if len(in) <= 3 {
+		return sign + in
+	}
+	out := ""
+	rem := len(in) % 3
+	if rem > 0 {
+		out = in[:rem] + ","
+		in = in[rem:]
+	}
+	for len(in) > 3 {
+		out += in[:3] + ","
+		in = in[3:]
+	}
+	out += in
+	return sign + out
+}

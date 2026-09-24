@@ -103,3 +103,26 @@ type IndexInfo struct {
 	IsValid    bool   `json:"is_valid"`
 	Definition string `json:"definition,omitempty"`
 }
+
+// DatabaseXIDInfo records transaction ID age and wraparound headroom for one database.
+type DatabaseXIDInfo struct {
+	Datname           string  `json:"datname"`
+	Age               int64   `json:"age"`
+	RemainingXIDs     int64   `json:"remaining_xids"`
+	PercentWraparound float64 `json:"percent_wraparound"`
+}
+
+// TableXIDInfo records transaction ID age for one table holding back the freeze horizon.
+type TableXIDInfo struct {
+	Schema    string `json:"schema"`
+	Table     string `json:"table"`
+	Age       int64  `json:"age"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// XIDReport combines database-level and table-level XID consumption.
+type XIDReport struct {
+	Databases              []DatabaseXIDInfo `json:"databases"`
+	OldestTables           []TableXIDInfo    `json:"oldest_tables"`
+	AutovacuumFreezeMaxAge int64             `json:"autovacuum_freeze_max_age"`
+}

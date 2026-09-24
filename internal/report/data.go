@@ -47,3 +47,7 @@ type ConfigData struct {
 type IndexesData struct {
 	Indexes []model.IndexInfo `json:"indexes"`
 }
+
+type XIDData struct {
+	XID model.XIDReport `json:"xid"`
+}

@@ -45,6 +45,11 @@ func renderTableCommand(w io.Writer, rep *model.Report, opts Options) {
 			fmt.Fprintf(w, "%s%s\n\n", c.Bold("User indexes"), dbSuffix(rep))
 			renderIndexes(w, data.Indexes, c)
 		}
+	case "xid":
+		if data, ok := rep.Data.(XIDData); ok {
+			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Transaction ID (XID) & Wraparound"), dbSuffix(rep))
+			renderXID(w, data.XID, c)
+		}
 	}
 	if len(rep.Findings) > 0 {
 		fmt.Fprintln(w)
@@ -160,6 +165,41 @@ func renderIndexes(w io.Writer, indexes []model.IndexInfo, c colors) {
 			idx.Schema, idx.Table, idx.Index, humanBytes(idx.SizeBytes), idx.Scans, validStr, uniqueStr)
 	}
 	tw.Flush()
+}
+
+func renderXID(w io.Writer, xid model.XIDReport, c colors) {
+	if len(xid.Databases) == 0 {
+		fmt.Fprintln(w, "No database XID information.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "DATABASE\tAGE\tREMAINING\tWRAPAROUND %\tSTATUS")
+	for _, d := range xid.Databases {
+		status := "OK"
+		if d.Age >= 1500000000 || d.RemainingXIDs < 100000000 {
+			status = c.Red("CRITICAL")
+		} else if d.Age >= xid.AutovacuumFreezeMaxAge && xid.AutovacuumFreezeMaxAge > 0 {
+			status = c.Yellow("WARN (freeze)")
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%.1f%%\t%s\n",
+			d.Datname, humanInt(d.Age), humanInt(d.RemainingXIDs), d.PercentWraparound, status)
+	}
+	tw.Flush()
+
+	if len(xid.OldestTables) > 0 {
+		fmt.Fprintf(w, "\n%s\n", c.Bold("Oldest tables (freeze horizon):"))
+		twTbl := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+		fmt.Fprintln(twTbl, "SCHEMA\tTABLE\tAGE\tSIZE\tSTATUS")
+		for _, t := range xid.OldestTables {
+			status := "OK"
+			if t.Age >= xid.AutovacuumFreezeMaxAge && xid.AutovacuumFreezeMaxAge > 0 {
+				status = c.Yellow("WARN")
+			}
+			fmt.Fprintf(twTbl, "%s\t%s\t%s\t%s\t%s\n",
+				t.Schema, t.Table, humanInt(t.Age), humanBytes(t.SizeBytes), status)
+		}
+		twTbl.Flush()
+	}
 }
 
 func oneLine(s string) string {
