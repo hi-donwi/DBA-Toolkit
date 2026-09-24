@@ -153,4 +153,29 @@ func TestHumanNeverLeaksPassword(t *testing.T) {
 	}
 }
 
+func TestHumanIndexes(t *testing.T) {
+	r := sampleReport()
+	r.Command = "indexes"
+	r.Data = IndexesData{
+		Indexes: []model.IndexInfo{
+			{Schema: "public", Table: "users", Index: "idx_users_id", SizeBytes: 1048576, Scans: 100, IsUnique: true, IsValid: true},
+			{Schema: "public", Table: "orders", Index: "idx_orders_status", SizeBytes: 20971520, Scans: 0, IsUnique: false, IsValid: false},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Human(&buf, r, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "User indexes") {
+		t.Errorf("output missing 'User indexes' header:\n%s", out)
+	}
+	if !strings.Contains(out, "idx_users_id") || !strings.Contains(out, "idx_orders_status") {
+		t.Errorf("output missing index names:\n%s", out)
+	}
+	if !strings.Contains(out, "1.0 MiB") || !strings.Contains(out, "20.0 MiB") {
+		t.Errorf("output missing human byte sizes:\n%s", out)
+	}
+}
+
 var _ = Options{} // Options is a value type used above

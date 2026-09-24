@@ -28,3 +28,18 @@ func fmtDur(seconds float64) string {
 func pct(use float64) string {
 	return fmt.Sprintf("%.1f%%", use)
 }
+
+// fmtBytes renders a byte count in human units for finding summaries.
+func fmtBytes(n int64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	f := float64(n)
+	i := 0
+	for f >= 1024 && i < len(units)-1 {
+		f /= 1024
+		i++
+	}
+	if i == 0 {
+		return fmt.Sprintf("%d %s", n, units[i])
+	}
+	return fmt.Sprintf("%.1f %s", f, units[i])
+}

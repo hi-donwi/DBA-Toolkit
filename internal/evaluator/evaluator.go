@@ -29,6 +29,9 @@ var Rules = []Rule{
 	{ID: "REPL-001", Title: "Replication role", Group: "replication"},
 	{ID: "REPL-002", Title: "Replica replay lag", Group: "replication"},
 	{ID: "DB-001", Title: "Database inventory", Group: "databases"},
+	{ID: "IDX-001", Title: "Unused index", Group: "indexes"},
+	{ID: "IDX-002", Title: "Invalid index", Group: "indexes"},
+	{ID: "IDX-003", Title: "Index inventory", Group: "indexes"},
 	{ID: "CFG-001", Title: "Configuration setting", Group: "configuration"},
 	{ID: "CFG-WAL-LEVEL", Title: "WAL level", Group: "configuration"},
 	{ID: "CFG-LOG-DURATION", Title: "Slow-statement logging", Group: "configuration"},
@@ -43,6 +46,7 @@ type Thresholds struct {
 	LockWait             time.Duration // 5s:  minimum blocked-wait flagged
 	ReplLagWarn          time.Duration // 30s: warn above replay lag
 	ReplLagCrit          time.Duration // 120s: critical above replay lag
+	UnusedIndexMinSize   int64         // 10MB: minimum index size to flag as unused
 }
 
 // DefaultThresholds returns the MVP defaults.
@@ -54,6 +58,7 @@ func DefaultThresholds() Thresholds {
 		LockWait:             5 * time.Second,
 		ReplLagWarn:          30 * time.Second,
 		ReplLagCrit:          2 * time.Minute,
+		UnusedIndexMinSize:   10 * 1024 * 1024,
 	}
 }
 

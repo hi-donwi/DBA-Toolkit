@@ -81,4 +81,9 @@ func TestFindingIDsAreDeclared(t *testing.T) {
 		{Name: "wal_level", Value: "minimal"},
 		{Name: "log_min_duration_statement", Value: "-1"},
 	}))
+	collect(EvaluateIndexes([]model.IndexInfo{
+		{Schema: "public", Table: "t", Index: "i", SizeBytes: 20000000, Scans: 0, IsUnique: false, IsValid: false},
+		{Schema: "public", Table: "t2", Index: "i2", SizeBytes: 20000000, Scans: 0, IsUnique: false, IsValid: true},
+		{Schema: "public", Table: "t3", Index: "i3", SizeBytes: 1000, Scans: 100, IsUnique: true, IsValid: true},
+	}, DefaultThresholds()))
 }

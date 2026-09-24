@@ -258,3 +258,73 @@ func TestEvaluateSettingsNoFalseWarnings(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluateIndexes(t *testing.T) {
+	th := DefaultThresholds() // UnusedIndexMinSize = 10MB
+
+	// 1. Empty indexes
+	emptyFs := EvaluateIndexes(nil, th)
+	if len(emptyFs) != 1 || emptyFs[0].ID != "IDX-003" || emptyFs[0].Severity != model.SeverityInfo {
+		t.Fatalf("unexpected empty indexes findings: %+v", emptyFs)
+	}
+
+	// 2. All valid, active indexes -> PASS
+	healthy := []model.IndexInfo{
+		{Schema: "public", Table: "users", Index: "idx_users_id", SizeBytes: 1048576, Scans: 1000, IsUnique: true, IsValid: true},
+		{Schema: "public", Table: "orders", Index: "idx_orders_user", SizeBytes: 5242880, Scans: 250, IsUnique: false, IsValid: true},
+	}
+	healthyFs := EvaluateIndexes(healthy, th)
+	if len(healthyFs) != 1 || healthyFs[0].ID != "IDX-003" || healthyFs[0].Severity != model.SeverityPass {
+		t.Fatalf("expected PASS finding for healthy indexes, got: %+v", healthyFs)
+	}
+
+	// 3. Problematic indexes: invalid + unused (large) + unused unique (should not warn) + unused small (should not warn)
+	mixed := []model.IndexInfo{
+		// Invalid index -> CRITICAL (IDX-002)
+		{Schema: "public", Table: "items", Index: "idx_items_broken", SizeBytes: 20971520, Scans: 0, IsUnique: false, IsValid: false, Definition: "CREATE INDEX idx_items_broken ON public.items (name)"},
+		// Unused large non-unique index (15MB >= 10MB, 0 scans) -> WARNING (IDX-001)
+		{Schema: "public", Table: "logs", Index: "idx_logs_old", SizeBytes: 15728640, Scans: 0, IsUnique: false, IsValid: true, Definition: "CREATE INDEX idx_logs_old ON public.logs (created_at)"},
+		// Unused unique index -> exempt from unused warning
+		{Schema: "public", Table: "users", Index: "idx_users_uuid", SizeBytes: 20971520, Scans: 0, IsUnique: true, IsValid: true},
+		// Unused small index (< 10MB) -> exempt from unused warning
+		{Schema: "public", Table: "tags", Index: "idx_tags_name", SizeBytes: 1048576, Scans: 0, IsUnique: false, IsValid: true},
+	}
+	mixedFs := EvaluateIndexes(mixed, th)
+
+	var hasInvalid, hasUnused, hasInventory bool
+	for _, f := range mixedFs {
+		switch f.ID {
+		case "IDX-002":
+			hasInvalid = true
+			if f.Severity != model.SeverityCritical {
+				t.Errorf("invalid index should be CRITICAL, got %s", f.Severity)
+			}
+			if !strings.Contains(f.Recommendation, "REINDEX INDEX CONCURRENTLY") {
+				t.Errorf("recommendation should mention REINDEX: %q", f.Recommendation)
+			}
+		case "IDX-001":
+			hasUnused = true
+			if f.Severity != model.SeverityWarning {
+				t.Errorf("unused index should be WARNING, got %s", f.Severity)
+			}
+			if !strings.Contains(f.Recommendation, "DROP INDEX CONCURRENTLY") {
+				t.Errorf("recommendation should mention DROP: %q", f.Recommendation)
+			}
+		case "IDX-003":
+			hasInventory = true
+			if f.Severity != model.SeverityInfo {
+				t.Errorf("inventory with issues should be INFO, got %s", f.Severity)
+			}
+		}
+	}
+
+	if !hasInvalid {
+		t.Error("expected IDX-002 finding for invalid index")
+	}
+	if !hasUnused {
+		t.Error("expected IDX-001 finding for unused large index")
+	}
+	if !hasInventory {
+		t.Error("expected IDX-003 inventory finding")
+	}
+}

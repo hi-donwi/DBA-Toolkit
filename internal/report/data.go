@@ -43,3 +43,7 @@ type DatabasesData struct {
 type ConfigData struct {
 	Settings []model.ConfigSetting `json:"settings"`
 }
+
+type IndexesData struct {
+	Indexes []model.IndexInfo `json:"indexes"`
+}

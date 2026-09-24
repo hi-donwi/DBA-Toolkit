@@ -40,6 +40,11 @@ func renderTableCommand(w io.Writer, rep *model.Report, opts Options) {
 			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Configuration"), dbSuffix(rep))
 			renderSettings(w, data.Settings, c)
 		}
+	case "indexes":
+		if data, ok := rep.Data.(IndexesData); ok {
+			fmt.Fprintf(w, "%s%s\n\n", c.Bold("User indexes"), dbSuffix(rep))
+			renderIndexes(w, data.Indexes, c)
+		}
 	}
 	if len(rep.Findings) > 0 {
 		fmt.Fprintln(w)
@@ -131,6 +136,28 @@ func renderSettings(w io.Writer, settings []model.ConfigSetting, c colors) {
 	for _, s := range settings {
 		value := s.Value + " " + s.Unit
 		fmt.Fprintf(tw, "%s\t%s\t%s\n", s.Name, value, s.Source)
+	}
+	tw.Flush()
+}
+
+func renderIndexes(w io.Writer, indexes []model.IndexInfo, c colors) {
+	if len(indexes) == 0 {
+		fmt.Fprintln(w, "No user indexes.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "SCHEMA\tTABLE\tINDEX\tSIZE\tSCANS\tVALID\tUNIQUE")
+	for _, idx := range indexes {
+		validStr := "YES"
+		if !idx.IsValid {
+			validStr = c.Red("NO")
+		}
+		uniqueStr := "NO"
+		if idx.IsUnique {
+			uniqueStr = "YES"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n",
+			idx.Schema, idx.Table, idx.Index, humanBytes(idx.SizeBytes), idx.Scans, validStr, uniqueStr)
 	}
 	tw.Flush()
 }

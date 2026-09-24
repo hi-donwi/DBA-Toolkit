@@ -22,7 +22,7 @@ type Options struct {
 // Human writes the concise terminal view of rep.
 func Human(w io.Writer, rep *model.Report, opts Options) error {
 	switch rep.Command {
-	case "sessions", "locks", "replication", "databases", "config":
+	case "sessions", "locks", "replication", "databases", "config", "indexes":
 		renderTableCommand(w, rep, opts)
 	case "diagnose", "health":
 		renderHealth(w, rep, opts)

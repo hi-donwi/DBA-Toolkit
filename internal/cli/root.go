@@ -141,6 +141,7 @@ func init() {
 	RootCmd.AddCommand(locksCmd)
 	RootCmd.AddCommand(replicationCmd)
 	RootCmd.AddCommand(databasesCmd)
+	RootCmd.AddCommand(indexesCmd)
 	RootCmd.AddCommand(configCmd)
 	RootCmd.AddCommand(rulesCmd)
 	RootCmd.AddCommand(versionCmd)

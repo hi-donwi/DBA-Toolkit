@@ -265,3 +265,28 @@ func (c *Collector) Settings(ctx context.Context) ([]model.ConfigSetting, error)
 	}
 	return out, rows.Err()
 }
+
+// Indexes lists user indexes with size, scans, uniqueness, and validity.
+func (c *Collector) Indexes(ctx context.Context) ([]model.IndexInfo, error) {
+	rows, err := c.q.Query(ctx,
+		"SELECT COALESCE(s.schemaname, ''), COALESCE(s.relname, ''), COALESCE(s.indexrelname, ''), "+
+			"COALESCE(pg_relation_size(s.indexrelid), 0)::bigint, COALESCE(s.idx_scan, 0)::bigint, "+
+			"i.indisunique, i.indisvalid, COALESCE(pg_get_indexdef(s.indexrelid), '') "+
+			"FROM pg_stat_user_indexes s "+
+			"JOIN pg_index i ON s.indexrelid = i.indexrelid "+
+			"ORDER BY 4 DESC, 3 ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]model.IndexInfo, 0)
+	for rows.Next() {
+		var idx model.IndexInfo
+		if err := rows.Scan(&idx.Schema, &idx.Table, &idx.Index, &idx.SizeBytes, &idx.Scans,
+			&idx.IsUnique, &idx.IsValid, &idx.Definition); err != nil {
+			return nil, err
+		}
+		out = append(out, idx)
+	}
+	return out, rows.Err()
+}

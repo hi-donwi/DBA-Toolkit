@@ -91,3 +91,15 @@ type ConfigSetting struct {
 	Source  string `json:"source,omitempty"`
 	Context string `json:"context,omitempty"`
 }
+
+// IndexInfo describes one user index, its table, size, scan count, and validity.
+type IndexInfo struct {
+	Schema     string `json:"schema"`
+	Table      string `json:"table"`
+	Index      string `json:"index"`
+	SizeBytes  int64  `json:"size_bytes"`
+	Scans      int64  `json:"scans"`
+	IsUnique   bool   `json:"is_unique"`
+	IsValid    bool   `json:"is_valid"`
+	Definition string `json:"definition,omitempty"`
+}

@@ -367,4 +367,41 @@ const (
 		"WHERE name IN ('max_connections','shared_buffers','work_mem','maintenance_work_mem'," +
 		"'wal_level','max_wal_size','log_min_duration_statement') " +
 		"ORDER BY name"
+	indexesQuery = "SELECT COALESCE(s.schemaname, ''), COALESCE(s.relname, ''), COALESCE(s.indexrelname, ''), " +
+		"COALESCE(pg_relation_size(s.indexrelid), 0)::bigint, COALESCE(s.idx_scan, 0)::bigint, " +
+		"i.indisunique, i.indisvalid, COALESCE(pg_get_indexdef(s.indexrelid), '') " +
+		"FROM pg_stat_user_indexes s " +
+		"JOIN pg_index i ON s.indexrelid = i.indexrelid " +
+		"ORDER BY 4 DESC, 3 ASC"
 )
+
+func TestCollectorIndexes(t *testing.T) {
+	q := &fakeQueryer{
+		query: map[string]fakeRows{
+			indexesQuery: {
+				rows: []fakeRow{
+					{"public", "users", "idx_users_email", int64(10485760), int64(150), true, true, "CREATE UNIQUE INDEX idx_users_email ON public.users USING btree (email)"},
+					{"public", "orders", "idx_orders_status", int64(20971520), int64(0), false, true, "CREATE INDEX idx_orders_status ON public.orders USING btree (status)"},
+					{"public", "items", "idx_items_invalid", int64(5242880), int64(0), false, false, "CREATE INDEX idx_items_invalid ON public.items USING btree (name)"},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.Indexes(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 indexes, got %d", len(got))
+	}
+	if got[0].Index != "idx_users_email" || !got[0].IsUnique || !got[0].IsValid || got[0].Scans != 150 {
+		t.Errorf("got[0] mismatch: %+v", got[0])
+	}
+	if got[1].Index != "idx_orders_status" || got[1].Scans != 0 {
+		t.Errorf("got[1] mismatch: %+v", got[1])
+	}
+	if got[2].Index != "idx_items_invalid" || got[2].IsValid {
+		t.Errorf("got[2] mismatch (expected invalid): %+v", got[2])
+	}
+}

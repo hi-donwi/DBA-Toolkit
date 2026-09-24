@@ -9,21 +9,23 @@ import (
 
 // Threshold flag variables, shared by the commands that expose them.
 var (
-	flagConnUsageWarn float64
-	flagConnUsageCrit float64
-	flagLongQuery     time.Duration
-	flagLockWait      time.Duration
-	flagLagWarn       time.Duration
-	flagLagCrit       time.Duration
+	flagConnUsageWarn    float64
+	flagConnUsageCrit    float64
+	flagLongQuery        time.Duration
+	flagLockWait         time.Duration
+	flagLagWarn          time.Duration
+	flagLagCrit          time.Duration
+	flagUnusedIndexBytes int64
 )
 
 const (
-	thresholdConnUsageWarn = "conn-usage-warn"
-	thresholdConnUsageCrit = "conn-usage-critical"
-	thresholdLongQuery     = "long-query-threshold"
-	thresholdLockWait      = "lock-wait-threshold"
-	thresholdLagWarn       = "lag-threshold"
-	thresholdLagCrit       = "lag-critical"
+	thresholdConnUsageWarn      = "conn-usage-warn"
+	thresholdConnUsageCrit      = "conn-usage-critical"
+	thresholdLongQuery          = "long-query-threshold"
+	thresholdLockWait           = "lock-wait-threshold"
+	thresholdLagWarn            = "lag-threshold"
+	thresholdLagCrit            = "lag-critical"
+	thresholdUnusedIndexMinSize = "unused-min-size"
 )
 
 // addThresholds registers the requested threshold flags on a command.
@@ -43,6 +45,8 @@ func addThresholds(cmd *cobra.Command, names ...string) {
 			f.DurationVar(&flagLagWarn, thresholdLagWarn, 0, "Warn when replica replay lag exceeds this duration (e.g. 30s)")
 		case thresholdLagCrit:
 			f.DurationVar(&flagLagCrit, thresholdLagCrit, 0, "Critical when replica replay lag exceeds this duration (e.g. 120s)")
+		case thresholdUnusedIndexMinSize:
+			f.Int64Var(&flagUnusedIndexBytes, thresholdUnusedIndexMinSize, 0, "Minimum index size in bytes to flag as unused (default 10485760 / 10MB)")
 		}
 	}
 }
@@ -68,6 +72,9 @@ func resolveThresholds(cmd *cobra.Command) evaluator.Thresholds {
 	}
 	if f.Changed(thresholdLagCrit) && flagLagCrit > 0 {
 		th.ReplLagCrit = flagLagCrit
+	}
+	if f.Changed(thresholdUnusedIndexMinSize) && flagUnusedIndexBytes > 0 {
+		th.UnusedIndexMinSize = flagUnusedIndexBytes
 	}
 	return th
 }
