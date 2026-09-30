@@ -65,6 +65,11 @@ func renderTableCommand(w io.Writer, rep *model.Report, opts Options) {
 			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Table Bloat & Dead Tuples"), dbSuffix(rep))
 			renderBloat(w, data.Bloat, c)
 		}
+	case "top":
+		if data, ok := rep.Data.(TopData); ok {
+			renderTop(w, rep, data, c, opts)
+			return
+		}
 	}
 	if len(rep.Findings) > 0 {
 		fmt.Fprintln(w)
@@ -317,5 +322,3 @@ func renderBloat(w io.Writer, rep model.BloatReport, c colors) {
 	}
 	tw.Flush()
 }
-
-

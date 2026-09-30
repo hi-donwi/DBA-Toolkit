@@ -9,19 +9,19 @@ import (
 
 // Threshold flag variables, shared by the commands that expose them.
 var (
-	flagConnUsageWarn    float64
-	flagConnUsageCrit    float64
-	flagLongQuery        time.Duration
-	flagLockWait         time.Duration
-	flagLagWarn          time.Duration
-	flagLagCrit          time.Duration
-	flagUnusedIndexBytes int64
-	flagXIDWarnAge       int64
-	flagXIDCritAge       int64
-	flagCacheHitWarn     float64
-	flagCacheHitCrit     float64
-	flagMeanQueryWarn    time.Duration
-	flagMeanQueryCrit    time.Duration
+	flagConnUsageWarn      float64
+	flagConnUsageCrit      float64
+	flagLongQuery          time.Duration
+	flagLockWait           time.Duration
+	flagLagWarn            time.Duration
+	flagLagCrit            time.Duration
+	flagUnusedIndexBytes   int64
+	flagXIDWarnAge         int64
+	flagXIDCritAge         int64
+	flagCacheHitWarn       float64
+	flagCacheHitCrit       float64
+	flagMeanQueryWarn      time.Duration
+	flagMeanQueryCrit      time.Duration
 	flagBloatDeadWarnRatio float64
 	flagBloatDeadCritRatio float64
 	flagBloatMinDeadTuples int64
@@ -141,4 +141,3 @@ func resolveThresholds(cmd *cobra.Command) evaluator.Thresholds {
 	}
 	return th
 }
-

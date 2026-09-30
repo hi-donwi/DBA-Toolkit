@@ -64,3 +64,10 @@ type BloatData struct {
 	Bloat model.BloatReport `json:"bloat"`
 }
 
+type TopData struct {
+	Connectivity model.Connectivity `json:"connectivity"`
+	Snapshot     model.TopSnapshot  `json:"snapshot"`
+}
+
+func (d TopData) connectivity() model.Connectivity { return d.Connectivity }
+func (d TopData) health() model.Health             { return d.Snapshot.Health }

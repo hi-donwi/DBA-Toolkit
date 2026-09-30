@@ -44,6 +44,7 @@ dbakit xid                    # transaction ID age, autovacuum freeze horizon & 
 dbakit cache                  # buffer cache hit ratios (database, table, and index)
 dbakit top-queries            # slow and resource-heavy queries from pg_stat_statements
 dbakit bloat                  # table bloat, dead tuples ratio, and autovacuum lag
+dbakit top                    # live interactive monitor dashboard (sessions, locks, health, lag)
 dbakit config                 # a small set of configuration settings
 dbakit rules                  # the compiled-in rule catalog
 ```
@@ -78,6 +79,7 @@ individual settings.
 | `cache` | `buffer`, `hit-ratio`, `buffercache` | Buffer cache hit ratios across database, tables, and indexes |
 | `top-queries` | `topq`, `slow-queries`, `statements` | Normalized slow queries, latency, and temp spills via `pg_stat_statements` |
 | `bloat` | `dead-tuples`, `tables-bloat`, `vacuum-needed` | Table bloat, dead tuples ratio, and autovacuum status |
+| `top` | `pgtop`, `monitor`, `live` | Live interactive terminal monitor dashboard (sessions, locks, health, lag) |
 | `config` | | `max_connections`, buffers, WAL level, slow-statement logging, and more |
 | `rules` | | The compiled-in rule catalog (ID, group, title) |
 | `version` | | Version, commit, and build time |
@@ -114,6 +116,7 @@ dbakit xid --warn-age 200000000 --crit-age 1500000000 --top-tables 10
 dbakit cache --cache-hit-warn 95.0 --cache-hit-crit 90.0 --limit 20
 dbakit top-queries --mean-warn 500ms --mean-crit 2s --limit 10
 dbakit bloat --dead-ratio-warn 20.0 --dead-ratio-crit 50.0 --min-dead-tuples 10000 --limit 20
+dbakit top --refresh 2s --limit 20 --sort duration
 ```
 
 Defaults: connection usage warn 80% / critical 95%, long queries 60s, lock

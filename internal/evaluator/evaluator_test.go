@@ -127,5 +127,3 @@ func TestFindingIDsAreDeclared(t *testing.T) {
 	}, DefaultThresholds()))
 	collect(EvaluateBloat(model.BloatReport{}, DefaultThresholds()))
 }
-
-

@@ -526,3 +526,43 @@ func (c *Collector) Bloat(ctx context.Context, limit int) (model.BloatReport, er
 	return rep, rows.Err()
 }
 
+// TopSnapshot collects a unified point-in-time snapshot covering health, active sessions, locks, and replication.
+func (c *Collector) TopSnapshot(ctx context.Context, maxQueryLen int) (model.TopSnapshot, error) {
+	var snap model.TopSnapshot
+	snap.Timestamp = c.now().UTC().Format(time.RFC3339)
+
+	h, err := c.Health(ctx)
+	if err != nil {
+		return snap, err
+	}
+	total, active, err := c.Usage(ctx)
+	if err != nil {
+		return snap, err
+	}
+	h.TotalConnections = total
+	h.ActiveConnections = active
+	if h.MaxConnections > 0 {
+		h.ConnectionUsage = float64(total) / float64(h.MaxConnections) * 100
+	}
+	snap.Health = h
+
+	sessions, err := c.Sessions(ctx, maxQueryLen)
+	if err != nil {
+		return snap, err
+	}
+	snap.Sessions = sessions
+
+	locks, err := c.Locks(ctx, maxQueryLen)
+	if err != nil {
+		return snap, err
+	}
+	snap.Locks = locks
+
+	repl, err := c.Replication(ctx)
+	if err != nil {
+		return snap, err
+	}
+	snap.Replication = repl
+
+	return snap, nil
+}

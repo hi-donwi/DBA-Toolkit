@@ -190,3 +190,11 @@ type BloatReport struct {
 	Tables []TableBloatInfo `json:"tables"`
 }
 
+// TopSnapshot aggregates a live point-in-time view of PostgreSQL cluster activity.
+type TopSnapshot struct {
+	Timestamp   string         `json:"timestamp"`
+	Health      Health         `json:"health"`
+	Sessions    []Session      `json:"sessions"`
+	Locks       []BlockingPair `json:"locks"`
+	Replication Replication    `json:"replication"`
+}

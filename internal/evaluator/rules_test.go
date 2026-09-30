@@ -638,5 +638,3 @@ func TestEvaluateBloat(t *testing.T) {
 		t.Error("expected BLOAT-002 WARNING for autovacuum starvation")
 	}
 }
-
-

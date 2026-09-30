@@ -311,6 +311,82 @@ func TestHumanBloat(t *testing.T) {
 	}
 }
 
+func TestHumanTop(t *testing.T) {
+	r := sampleReport()
+	r.Command = "top"
+	r.Data = TopData{
+		Connectivity: model.Connectivity{
+			Connected:      true,
+			Version:        "16.4",
+			Database:       "app",
+			LatencySeconds: 0.0015,
+		},
+		Snapshot: model.TopSnapshot{
+			Timestamp: "2026-09-30T11:45:00Z",
+			Health: model.Health{
+				Version:           "16.4",
+				CurrentDatabase:   "app",
+				UptimeSeconds:     86400,
+				TotalConnections:  25,
+				ActiveConnections: 5,
+				MaxConnections:    100,
+				ConnectionUsage:   25.0,
+				DatabaseSizeBytes: 1073741824,
+			},
+			Sessions: []model.Session{
+				{PID: 1234, User: "app_user", Database: "app", State: "active", DurationSeconds: 15.0, WaitEvent: "ClientRead", Query: "SELECT * FROM orders"},
+			},
+			Locks: []model.BlockingPair{
+				{BlockedPID: 1234, BlockingPID: 9999, Database: "app", WaitSeconds: 5.0, BlockedQuery: "UPDATE orders SET status = 1"},
+			},
+			Replication: model.Replication{
+				Role:              "primary",
+				ConnectedStandbys: 2,
+			},
+		},
+	}
+	r.Findings = []model.Finding{
+		{
+			ID:       "CONN-001",
+			Severity: model.SeverityWarning,
+			Title:    "Connection usage elevated",
+			Summary:  "25 of 100 connections in use",
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := Human(&buf, r, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+
+	if !strings.Contains(out, "DBA-Toolkit PostgreSQL Live Monitor (dbakit top)") {
+		t.Errorf("missing top title in:\n%s", out)
+	}
+	if !strings.Contains(out, "PostgreSQL: 16.4") || !strings.Contains(out, "Role: primary") {
+		t.Errorf("missing postgres or role in:\n%s", out)
+	}
+	if !strings.Contains(out, "Connections: 25/100 (25.0%)") {
+		t.Errorf("missing connections in:\n%s", out)
+	}
+	if !strings.Contains(out, "Contention:") || !strings.Contains(out, "1234") || !strings.Contains(out, "9999") {
+		t.Errorf("missing lock contention in:\n%s", out)
+	}
+	if !strings.Contains(out, "Active Sessions (1)") || !strings.Contains(out, "SELECT * FROM orders") {
+		t.Errorf("missing active sessions in:\n%s", out)
+	}
+	if !strings.Contains(out, "Active Diagnostics") || !strings.Contains(out, "CONN-001") {
+		t.Errorf("missing active diagnostics in:\n%s", out)
+	}
+
+	// Also verify JSON round-trip for TopData
+	var jsonBuf bytes.Buffer
+	if err := JSON(&jsonBuf, r); err != nil {
+		t.Fatalf("JSON failed: %v", err)
+	}
+	if !strings.Contains(jsonBuf.String(), `"timestamp": "2026-09-30T11:45:00Z"`) {
+		t.Errorf("JSON missing snapshot timestamp:\n%s", jsonBuf.String())
+	}
+}
+
 var _ = Options{} // Options is a value type used above
-
-

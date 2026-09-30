@@ -660,4 +660,43 @@ func TestCollectorBloat(t *testing.T) {
 	}
 }
 
-
+func TestCollectorTopSnapshot(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			healthQuery: {"PostgreSQL 16.4 (Debian)", 160004, "app", 7200.0, 100, 1048576},
+			roleQuery:   {false},
+		},
+		query: map[string]fakeRows{
+			usageQuery: {rows: []fakeRow{{2, 10}}},
+			sessionsQuery: {rows: []fakeRow{
+				{101, "dba", "app", "active", 12.5, "Client", "ClientRead", "SELECT 1"},
+			}},
+			locksQuery: {rows: []fakeRow{
+				{101, "dba", 102, "writer", "app", 5.0, "active", "active", "UPDATE a", "UPDATE a"},
+			}},
+			replicasQuery: {rows: []fakeRow{
+				{"replica1", "10.0.0.2", "streaming", "async", 0.05},
+			}},
+		},
+	}
+	c := New(q)
+	snap, err := c.TopSnapshot(context.Background(), 50)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if snap.Health.Version != "16.4" || snap.Health.ActiveConnections != 2 {
+		t.Errorf("unexpected health: %+v", snap.Health)
+	}
+	if len(snap.Sessions) != 1 || snap.Sessions[0].PID != 101 {
+		t.Errorf("unexpected sessions: %+v", snap.Sessions)
+	}
+	if len(snap.Locks) != 1 || snap.Locks[0].BlockedPID != 101 {
+		t.Errorf("unexpected locks: %+v", snap.Locks)
+	}
+	if snap.Replication.Role != "primary" || len(snap.Replication.Replicas) != 1 {
+		t.Errorf("unexpected replication: %+v", snap.Replication)
+	}
+	if snap.Timestamp == "" {
+		t.Errorf("expected non-empty timestamp")
+	}
+}

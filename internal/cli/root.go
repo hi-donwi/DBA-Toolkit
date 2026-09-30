@@ -146,6 +146,7 @@ func init() {
 	RootCmd.AddCommand(cacheCmd)
 	RootCmd.AddCommand(topQueriesCmd)
 	RootCmd.AddCommand(bloatCmd)
+	RootCmd.AddCommand(topCmd)
 	RootCmd.AddCommand(configCmd)
 	RootCmd.AddCommand(rulesCmd)
 	RootCmd.AddCommand(versionCmd)
