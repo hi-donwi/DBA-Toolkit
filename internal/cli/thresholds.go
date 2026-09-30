@@ -22,6 +22,9 @@ var (
 	flagCacheHitCrit     float64
 	flagMeanQueryWarn    time.Duration
 	flagMeanQueryCrit    time.Duration
+	flagBloatDeadWarnRatio float64
+	flagBloatDeadCritRatio float64
+	flagBloatMinDeadTuples int64
 )
 
 const (
@@ -38,6 +41,9 @@ const (
 	thresholdCacheHitCrit       = "cache-hit-crit"
 	thresholdMeanQueryWarn      = "mean-warn"
 	thresholdMeanQueryCrit      = "mean-crit"
+	thresholdBloatDeadWarn      = "dead-ratio-warn"
+	thresholdBloatDeadCrit      = "dead-ratio-crit"
+	thresholdBloatMinDead       = "min-dead-tuples"
 )
 
 // addThresholds registers the requested threshold flags on a command.
@@ -71,6 +77,12 @@ func addThresholds(cmd *cobra.Command, names ...string) {
 			f.DurationVar(&flagMeanQueryWarn, thresholdMeanQueryWarn, 0, "Warn when mean query execution time exceeds this duration (default 500ms)")
 		case thresholdMeanQueryCrit:
 			f.DurationVar(&flagMeanQueryCrit, thresholdMeanQueryCrit, 0, "Critical when mean query execution time exceeds this duration (default 2s)")
+		case thresholdBloatDeadWarn:
+			f.Float64Var(&flagBloatDeadWarnRatio, thresholdBloatDeadWarn, 0, "Warn when table dead tuple ratio exceeds this percent (default 20.0)")
+		case thresholdBloatDeadCrit:
+			f.Float64Var(&flagBloatDeadCritRatio, thresholdBloatDeadCrit, 0, "Critical when table dead tuple ratio exceeds this percent (default 50.0)")
+		case thresholdBloatMinDead:
+			f.Int64Var(&flagBloatMinDeadTuples, thresholdBloatMinDead, 0, "Minimum dead tuples to flag table bloat (default 10000)")
 		}
 	}
 }
@@ -117,6 +129,15 @@ func resolveThresholds(cmd *cobra.Command) evaluator.Thresholds {
 	}
 	if f.Changed(thresholdMeanQueryCrit) && flagMeanQueryCrit > 0 {
 		th.MeanQueryCrit = flagMeanQueryCrit
+	}
+	if f.Changed(thresholdBloatDeadWarn) && flagBloatDeadWarnRatio > 0 {
+		th.BloatDeadWarnRatio = flagBloatDeadWarnRatio
+	}
+	if f.Changed(thresholdBloatDeadCrit) && flagBloatDeadCritRatio > 0 {
+		th.BloatDeadCritRatio = flagBloatDeadCritRatio
+	}
+	if f.Changed(thresholdBloatMinDead) && flagBloatMinDeadTuples > 0 {
+		th.BloatMinDeadTuples = flagBloatMinDeadTuples
 	}
 	return th
 }

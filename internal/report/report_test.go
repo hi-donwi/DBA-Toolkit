@@ -285,5 +285,32 @@ func TestHumanTopQueries(t *testing.T) {
 	}
 }
 
+func TestHumanBloat(t *testing.T) {
+	r := sampleReport()
+	r.Command = "bloat"
+	r.Data = BloatData{
+		Bloat: model.BloatReport{
+			Tables: []model.TableBloatInfo{
+				{Schema: "public", Table: "events", LiveTuples: 50000, DeadTuples: 25000, DeadTupleRatio: 33.3, TableSizeBytes: 20971520, TotalSizeBytes: 41943040, LastVacuum: "2026-09-28 10:00:00", LastAutovacuum: "2026-09-29 02:00:00"},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Human(&buf, r, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Table Bloat & Dead Tuples") {
+		t.Errorf("output missing Bloat header:\n%s", out)
+	}
+	if !strings.Contains(out, "events") || !strings.Contains(out, "33.3%") {
+		t.Errorf("output missing table bloat data:\n%s", out)
+	}
+	if !strings.Contains(out, "20.0 MiB") || !strings.Contains(out, "40.0 MiB") {
+		t.Errorf("output missing table human size:\n%s", out)
+	}
+}
+
 var _ = Options{} // Options is a value type used above
+
 

@@ -171,3 +171,22 @@ type TopQueriesReport struct {
 	StatementsCount    int        `json:"statements_count"`
 	Queries            []TopQuery `json:"queries"`
 }
+
+// TableBloatInfo records dead tuple statistics and size metrics for one table.
+type TableBloatInfo struct {
+	Schema         string  `json:"schema"`
+	Table          string  `json:"table"`
+	LiveTuples     int64   `json:"live_tuples"`
+	DeadTuples     int64   `json:"dead_tuples"`
+	DeadTupleRatio float64 `json:"dead_tuple_ratio"` // percentage of dead tuples over total
+	TableSizeBytes int64   `json:"table_size_bytes"`
+	TotalSizeBytes int64   `json:"total_size_bytes"` // includes indexes & toast
+	LastVacuum     string  `json:"last_vacuum,omitempty"`
+	LastAutovacuum string  `json:"last_autovacuum,omitempty"`
+}
+
+// BloatReport holds dead tuple and bloat statistics across tables.
+type BloatReport struct {
+	Tables []TableBloatInfo `json:"tables"`
+}
+

@@ -59,3 +59,8 @@ type CacheData struct {
 type TopQueriesData struct {
 	TopQueries model.TopQueriesReport `json:"top_queries"`
 }
+
+type BloatData struct {
+	Bloat model.BloatReport `json:"bloat"`
+}
+

@@ -60,6 +60,11 @@ func renderTableCommand(w io.Writer, rep *model.Report, opts Options) {
 			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Top Slow Queries (pg_stat_statements)"), dbSuffix(rep))
 			renderTopQueries(w, data.TopQueries, c)
 		}
+	case "bloat":
+		if data, ok := rep.Data.(BloatData); ok {
+			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Table Bloat & Dead Tuples"), dbSuffix(rep))
+			renderBloat(w, data.Bloat, c)
+		}
 	}
 	if len(rep.Findings) > 0 {
 		fmt.Fprintln(w)
@@ -281,4 +286,36 @@ func fmtMs(ms float64) string {
 	}
 	return fmtDur(ms / 1000.0)
 }
+
+func renderBloat(w io.Writer, rep model.BloatReport, c colors) {
+	if len(rep.Tables) == 0 {
+		fmt.Fprintln(w, "No user tables.")
+		return
+	}
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "SCHEMA\tTABLE\tLIVE TUPLES\tDEAD TUPLES\tDEAD %\tTABLE SIZE\tTOTAL SIZE\tLAST VACUUM\tLAST AUTOVACUUM")
+	for _, t := range rep.Tables {
+		deadPctStr := fmt.Sprintf("%.1f%%", t.DeadTupleRatio)
+		if t.DeadTupleRatio >= 50.0 && t.DeadTuples >= 10000 {
+			deadPctStr = c.Red(deadPctStr)
+		} else if t.DeadTupleRatio >= 20.0 && t.DeadTuples >= 10000 {
+			deadPctStr = c.Yellow(deadPctStr)
+		}
+		lastVac := t.LastVacuum
+		if lastVac == "" {
+			lastVac = "never"
+		}
+		lastAuto := t.LastAutovacuum
+		if lastAuto == "" {
+			lastAuto = "never"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			t.Schema, t.Table,
+			humanInt(t.LiveTuples), humanInt(t.DeadTuples), deadPctStr,
+			humanBytes(t.TableSizeBytes), humanBytes(t.TotalSizeBytes),
+			lastVac, lastAuto)
+	}
+	tw.Flush()
+}
+
 

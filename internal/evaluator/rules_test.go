@@ -576,3 +576,67 @@ func TestEvaluateTopQueries(t *testing.T) {
 	}
 }
 
+func TestEvaluateBloat(t *testing.T) {
+	th := DefaultThresholds() // warn 20%, crit 50%, minDead 10,000
+
+	// 1. Empty bloat report
+	emptyFs := EvaluateBloat(model.BloatReport{}, th)
+	if len(emptyFs) != 1 || emptyFs[0].ID != "BLOAT-003" || emptyFs[0].Severity != model.SeverityInfo {
+		t.Errorf("empty bloat report expected 1 INFO finding, got: %+v", emptyFs)
+	}
+
+	// 2. Healthy report
+	healthyRep := model.BloatReport{
+		Tables: []model.TableBloatInfo{
+			{Schema: "public", Table: "users", LiveTuples: 50000, DeadTuples: 200, DeadTupleRatio: 0.39, TotalSizeBytes: 10485760, LastAutovacuum: "2026-09-30 01:00:00"},
+		},
+	}
+	healthyFs := EvaluateBloat(healthyRep, th)
+	for _, f := range healthyFs {
+		if f.Severity != model.SeverityPass {
+			t.Errorf("expected PASS severity for healthy bloat, got %s for %s", f.Severity, f.ID)
+		}
+	}
+
+	// 3. Warning bloat (25% dead ratio, 25,000 dead tuples)
+	warnRep := model.BloatReport{
+		Tables: []model.TableBloatInfo{
+			{Schema: "public", Table: "orders", LiveTuples: 75000, DeadTuples: 25000, DeadTupleRatio: 25.0, TotalSizeBytes: 52428800, LastAutovacuum: "2026-09-29 12:00:00"},
+		},
+	}
+	warnFs := EvaluateBloat(warnRep, th)
+	var hasWarn bool
+	for _, f := range warnFs {
+		if f.ID == "BLOAT-001" && f.Severity == model.SeverityWarning {
+			hasWarn = true
+		}
+	}
+	if !hasWarn {
+		t.Errorf("expected BLOAT-001 WARNING for 25%% dead ratio, got: %+v", warnFs)
+	}
+
+	// 4. Critical bloat (65% dead ratio) and autovacuum starvation (never vacuumed)
+	critRep := model.BloatReport{
+		Tables: []model.TableBloatInfo{
+			{Schema: "public", Table: "events", LiveTuples: 35000, DeadTuples: 65000, DeadTupleRatio: 65.0, TotalSizeBytes: 104857600, LastVacuum: "", LastAutovacuum: ""},
+		},
+	}
+	critFs := EvaluateBloat(critRep, th)
+	var hasCrit, hasStarve bool
+	for _, f := range critFs {
+		if f.ID == "BLOAT-001" && f.Severity == model.SeverityCritical {
+			hasCrit = true
+		}
+		if f.ID == "BLOAT-002" && f.Severity == model.SeverityWarning {
+			hasStarve = true
+		}
+	}
+	if !hasCrit {
+		t.Error("expected BLOAT-001 CRITICAL for 65% dead ratio")
+	}
+	if !hasStarve {
+		t.Error("expected BLOAT-002 WARNING for autovacuum starvation")
+	}
+}
+
+

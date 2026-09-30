@@ -43,6 +43,9 @@ var Rules = []Rule{
 	{ID: "TOPQ-002", Title: "Slow query mean latency", Group: "queries"},
 	{ID: "TOPQ-003", Title: "Query temp disk spills", Group: "queries"},
 	{ID: "TOPQ-004", Title: "Top queries inventory", Group: "queries"},
+	{ID: "BLOAT-001", Title: "Table dead tuple ratio", Group: "bloat"},
+	{ID: "BLOAT-002", Title: "Table autovacuum starvation", Group: "bloat"},
+	{ID: "BLOAT-003", Title: "Bloat inventory", Group: "bloat"},
 	{ID: "CFG-001", Title: "Configuration setting", Group: "configuration"},
 	{ID: "CFG-WAL-LEVEL", Title: "WAL level", Group: "configuration"},
 	{ID: "CFG-LOG-DURATION", Title: "Slow-statement logging", Group: "configuration"},
@@ -64,6 +67,9 @@ type Thresholds struct {
 	CacheHitCritPercent  float64       // 90: critical below this %
 	MeanQueryWarn        time.Duration // 500ms: warn above this mean execution time
 	MeanQueryCrit        time.Duration // 2s: critical above this mean execution time
+	BloatDeadWarnRatio   float64       // 20.0%: warn when dead tuple ratio exceeds this %
+	BloatDeadCritRatio   float64       // 50.0%: critical when dead tuple ratio exceeds this %
+	BloatMinDeadTuples   int64         // 10,000: minimum dead tuples before flagging bloat
 }
 
 // DefaultThresholds returns the MVP defaults.
@@ -82,6 +88,9 @@ func DefaultThresholds() Thresholds {
 		CacheHitCritPercent:  90.0,
 		MeanQueryWarn:        500 * time.Millisecond,
 		MeanQueryCrit:        2 * time.Second,
+		BloatDeadWarnRatio:   20.0,
+		BloatDeadCritRatio:   50.0,
+		BloatMinDeadTuples:   10_000,
 	}
 }
 

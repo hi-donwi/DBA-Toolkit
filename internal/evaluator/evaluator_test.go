@@ -117,5 +117,15 @@ func TestFindingIDsAreDeclared(t *testing.T) {
 		},
 	}, DefaultThresholds()))
 	collect(EvaluateTopQueries(model.TopQueriesReport{ExtensionAvailable: true}, DefaultThresholds()))
+	collect(EvaluateBloat(model.BloatReport{
+		Tables: []model.TableBloatInfo{
+			{Schema: "public", Table: "t1", LiveTuples: 1000, DeadTuples: 50000, DeadTupleRatio: 98.0, TableSizeBytes: 1000000},
+			{Schema: "public", Table: "t2", LiveTuples: 100000, DeadTuples: 25000, DeadTupleRatio: 20.0, TableSizeBytes: 2000000},
+			{Schema: "public", Table: "t3", LiveTuples: 100000, DeadTuples: 500, DeadTupleRatio: 0.5, TableSizeBytes: 500000},
+			{Schema: "public", Table: "t4", LiveTuples: 1000, DeadTuples: 15000, DeadTupleRatio: 90.0, LastVacuum: "", LastAutovacuum: ""},
+		},
+	}, DefaultThresholds()))
+	collect(EvaluateBloat(model.BloatReport{}, DefaultThresholds()))
 }
+
 

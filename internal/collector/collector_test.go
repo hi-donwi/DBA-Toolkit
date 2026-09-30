@@ -420,6 +420,16 @@ const (
 		"FROM pg_stat_statements " +
 		"ORDER BY total_time DESC " +
 		"LIMIT $1"
+	bloatQuery = "SELECT COALESCE(schemaname, ''), COALESCE(relname, ''), " +
+		"COALESCE(n_live_tup, 0)::bigint, COALESCE(n_dead_tup, 0)::bigint, " +
+		"COALESCE(n_dead_tup::float8 / NULLIF(n_live_tup + n_dead_tup, 0) * 100, 0), " +
+		"COALESCE(pg_relation_size(relid), 0)::bigint, " +
+		"COALESCE(pg_total_relation_size(relid), 0)::bigint, " +
+		"COALESCE(to_char(last_vacuum, 'YYYY-MM-DD HH24:MI:SS'), ''), " +
+		"COALESCE(to_char(last_autovacuum, 'YYYY-MM-DD HH24:MI:SS'), '') " +
+		"FROM pg_stat_user_tables " +
+		"ORDER BY n_dead_tup DESC, pg_total_relation_size(relid) DESC " +
+		"LIMIT $1"
 )
 
 func TestCollectorIndexes(t *testing.T) {
@@ -622,4 +632,32 @@ func TestCollectorTopQueries_Legacy(t *testing.T) {
 		t.Errorf("query mismatch: %+v", got.Queries[0])
 	}
 }
+
+func TestCollectorBloat(t *testing.T) {
+	q := &fakeQueryer{
+		query: map[string]fakeRows{
+			bloatQuery: {
+				rows: []fakeRow{
+					{"public", "orders", int64(100000), int64(45000), 31.03, int64(52428800), int64(104857600), "2026-09-28 10:00:00", "2026-09-29 02:00:00"},
+					{"public", "audit_log", int64(5000), int64(50000), 90.91, int64(20971520), int64(31457280), "", ""},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.Bloat(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.Tables) != 2 {
+		t.Fatalf("expected 2 tables, got %d", len(got.Tables))
+	}
+	if got.Tables[0].Table != "orders" || got.Tables[0].DeadTuples != 45000 || got.Tables[0].DeadTupleRatio != 31.03 {
+		t.Errorf("table[0] mismatch: %+v", got.Tables[0])
+	}
+	if got.Tables[1].Table != "audit_log" || got.Tables[1].LastAutovacuum != "" {
+		t.Errorf("table[1] mismatch: %+v", got.Tables[1])
+	}
+}
+
 

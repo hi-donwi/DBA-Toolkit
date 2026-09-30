@@ -486,3 +486,43 @@ func (c *Collector) TopQueries(ctx context.Context, limit int) (model.TopQueries
 	}
 	return rep, rows.Err()
 }
+
+// Bloat collects dead tuple statistics and table sizes from pg_stat_user_tables.
+func (c *Collector) Bloat(ctx context.Context, limit int) (model.BloatReport, error) {
+	var rep model.BloatReport
+	if limit <= 0 {
+		limit = 20
+	}
+
+	rows, err := c.q.Query(ctx,
+		"SELECT COALESCE(schemaname, ''), COALESCE(relname, ''), "+
+			"COALESCE(n_live_tup, 0)::bigint, COALESCE(n_dead_tup, 0)::bigint, "+
+			"COALESCE(n_dead_tup::float8 / NULLIF(n_live_tup + n_dead_tup, 0) * 100, 0), "+
+			"COALESCE(pg_relation_size(relid), 0)::bigint, "+
+			"COALESCE(pg_total_relation_size(relid), 0)::bigint, "+
+			"COALESCE(to_char(last_vacuum, 'YYYY-MM-DD HH24:MI:SS'), ''), "+
+			"COALESCE(to_char(last_autovacuum, 'YYYY-MM-DD HH24:MI:SS'), '') "+
+			"FROM pg_stat_user_tables "+
+			"ORDER BY n_dead_tup DESC, pg_total_relation_size(relid) DESC "+
+			"LIMIT $1", limit)
+	if err != nil {
+		return rep, err
+	}
+	defer rows.Close()
+
+	rep.Tables = make([]model.TableBloatInfo, 0)
+	for rows.Next() {
+		var t model.TableBloatInfo
+		if err := rows.Scan(
+			&t.Schema, &t.Table,
+			&t.LiveTuples, &t.DeadTuples, &t.DeadTupleRatio,
+			&t.TableSizeBytes, &t.TotalSizeBytes,
+			&t.LastVacuum, &t.LastAutovacuum,
+		); err != nil {
+			return rep, err
+		}
+		rep.Tables = append(rep.Tables, t)
+	}
+	return rep, rows.Err()
+}
+

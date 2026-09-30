@@ -43,6 +43,7 @@ dbakit indexes                # user indexes with size, scans, and validity
 dbakit xid                    # transaction ID age, autovacuum freeze horizon & wraparound
 dbakit cache                  # buffer cache hit ratios (database, table, and index)
 dbakit top-queries            # slow and resource-heavy queries from pg_stat_statements
+dbakit bloat                  # table bloat, dead tuples ratio, and autovacuum lag
 dbakit config                 # a small set of configuration settings
 dbakit rules                  # the compiled-in rule catalog
 ```
@@ -76,6 +77,7 @@ individual settings.
 | `xid` | `wraparound`, `freeze`, `vacuum` | Transaction ID (XID) age, wraparound headroom, and oldest tables |
 | `cache` | `buffer`, `hit-ratio`, `buffercache` | Buffer cache hit ratios across database, tables, and indexes |
 | `top-queries` | `topq`, `slow-queries`, `statements` | Normalized slow queries, latency, and temp spills via `pg_stat_statements` |
+| `bloat` | `dead-tuples`, `tables-bloat`, `vacuum-needed` | Table bloat, dead tuples ratio, and autovacuum status |
 | `config` | | `max_connections`, buffers, WAL level, slow-statement logging, and more |
 | `rules` | | The compiled-in rule catalog (ID, group, title) |
 | `version` | | Version, commit, and build time |
@@ -98,7 +100,7 @@ reading table data (which dbakit does not) is a separate, stricter grant.
 
 ## Thresholds
 
-Long-query, lock, replication, index, XID, cache, and top-query rules take thresholds; health uses connection
+Long-query, lock, replication, index, XID, cache, top-query, and bloat rules take thresholds; health uses connection
 usage percentages.
 
 ```sh
@@ -111,12 +113,14 @@ dbakit indexes --unused-min-size 10485760
 dbakit xid --warn-age 200000000 --crit-age 1500000000 --top-tables 10
 dbakit cache --cache-hit-warn 95.0 --cache-hit-crit 90.0 --limit 20
 dbakit top-queries --mean-warn 500ms --mean-crit 2s --limit 10
+dbakit bloat --dead-ratio-warn 20.0 --dead-ratio-crit 50.0 --min-dead-tuples 10000 --limit 20
 ```
 
 Defaults: connection usage warn 80% / critical 95%, long queries 60s, lock
 wait 5s, replay lag warn 30s / critical 120s, unused index min size 10MB,
 XID age warn 200,000,000 (200M, matches default `autovacuum_freeze_max_age`) / critical 1,500,000,000 (1.5B),
-cache hit ratio warn 95.0% / critical 90.0%, query mean execution time warn 500ms / critical 2s.
+cache hit ratio warn 95.0% / critical 90.0%, query mean execution time warn 500ms / critical 2s,
+table dead tuple ratio warn 20.0% / critical 50.0% (minimum 10,000 dead tuples).
 
 ## Output
 
