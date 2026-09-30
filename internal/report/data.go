@@ -51,3 +51,11 @@ type IndexesData struct {
 type XIDData struct {
 	XID model.XIDReport `json:"xid"`
 }
+
+type CacheData struct {
+	Cache model.CacheReport `json:"cache"`
+}
+
+type TopQueriesData struct {
+	TopQueries model.TopQueriesReport `json:"top_queries"`
+}

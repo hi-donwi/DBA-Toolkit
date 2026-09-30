@@ -351,3 +351,138 @@ func (c *Collector) XID(ctx context.Context, topTablesLimit int) (model.XIDRepor
 	}
 	return rep, tblRows.Err()
 }
+
+// Cache collects database, table, and index buffer cache hit ratios.
+func (c *Collector) Cache(ctx context.Context, topTablesLimit int) (model.CacheReport, error) {
+	var rep model.CacheReport
+	if topTablesLimit <= 0 {
+		topTablesLimit = 20
+	}
+
+	var heapHit, indexHit, toastHit float64
+	var dbName string
+	if err := c.q.QueryRow(ctx,
+		"SELECT current_database(), "+
+			"COALESCE(sum(heap_blks_hit)::float8 / NULLIF(sum(heap_blks_hit) + sum(heap_blks_read), 0) * 100, 100), "+
+			"COALESCE(sum(idx_blks_hit)::float8 / NULLIF(sum(idx_blks_hit) + sum(idx_blks_read), 0) * 100, 100), "+
+			"COALESCE(sum(toast_blks_hit)::float8 / NULLIF(sum(toast_blks_hit) + sum(toast_blks_read), 0) * 100, 100) "+
+			"FROM pg_statio_user_tables",
+		nil, &dbName, &heapHit, &indexHit, &toastHit); err != nil {
+		return rep, err
+	}
+	rep.DatabaseName = dbName
+	rep.HeapHitRatio = heapHit
+	rep.IndexHitRatio = indexHit
+	rep.ToastHitRatio = toastHit
+
+	var totalHit, totalRead int64
+	_ = c.q.QueryRow(ctx,
+		"SELECT COALESCE(sum(heap_blks_hit + idx_blks_hit), 0)::bigint, "+
+			"COALESCE(sum(heap_blks_read + idx_blks_read), 0)::bigint "+
+			"FROM pg_statio_user_tables",
+		nil, &totalHit, &totalRead)
+
+	if totalHit+totalRead > 0 {
+		rep.OverallRatio = (float64(totalHit) / float64(totalHit+totalRead)) * 100.0
+	} else {
+		rep.OverallRatio = 100.0
+	}
+
+	tblRows, err := c.q.Query(ctx,
+		"SELECT COALESCE(schemaname, ''), COALESCE(relname, ''), "+
+			"COALESCE(heap_blks_read, 0)::bigint, COALESCE(heap_blks_hit, 0)::bigint, "+
+			"COALESCE(heap_blks_hit::float8 / NULLIF(heap_blks_hit + heap_blks_read, 0) * 100, 100), "+
+			"COALESCE(idx_blks_read, 0)::bigint, COALESCE(idx_blks_hit, 0)::bigint, "+
+			"COALESCE(idx_blks_hit::float8 / NULLIF(idx_blks_hit + idx_blks_read, 0) * 100, 100) "+
+			"FROM pg_statio_user_tables "+
+			"ORDER BY (heap_blks_read + idx_blks_read) DESC, (heap_blks_hit + idx_blks_hit) DESC "+
+			"LIMIT $1", topTablesLimit)
+	if err != nil {
+		return rep, err
+	}
+	defer tblRows.Close()
+
+	rep.Tables = make([]model.TableCacheInfo, 0)
+	for tblRows.Next() {
+		var t model.TableCacheInfo
+		if err := tblRows.Scan(&t.Schema, &t.Table,
+			&t.HeapReads, &t.HeapHits, &t.HeapHitRatio,
+			&t.IndexReads, &t.IndexHits, &t.IndexHitRatio); err != nil {
+			return rep, err
+		}
+		rep.Tables = append(rep.Tables, t)
+	}
+	return rep, tblRows.Err()
+}
+
+// TopQueries inspects pg_stat_statements for performance bottlenecks.
+func (c *Collector) TopQueries(ctx context.Context, limit int) (model.TopQueriesReport, error) {
+	var rep model.TopQueriesReport
+	if limit <= 0 {
+		limit = 10
+	}
+
+	var extExists bool
+	if err := c.q.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')",
+		nil, &extExists); err != nil {
+		return rep, err
+	}
+	rep.ExtensionAvailable = extExists
+	if !extExists {
+		return rep, nil
+	}
+
+	if err := c.q.QueryRow(ctx, "SELECT count(*)::int FROM pg_stat_statements", nil, &rep.StatementsCount); err != nil {
+		return rep, err
+	}
+
+	var hasExecTime bool
+	if err := c.q.QueryRow(ctx,
+		"SELECT EXISTS (SELECT 1 FROM information_schema.columns "+
+			"WHERE table_name = 'pg_stat_statements' AND column_name = 'total_exec_time')",
+		nil, &hasExecTime); err != nil {
+		return rep, err
+	}
+
+	var querySQL string
+	if hasExecTime {
+		querySQL = "SELECT COALESCE(queryid, 0)::bigint, COALESCE(query, ''), " +
+			"calls, total_exec_time, mean_exec_time, max_exec_time, rows, " +
+			"shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written, " +
+			"temp_blks_written " +
+			"FROM pg_stat_statements " +
+			"ORDER BY total_exec_time DESC " +
+			"LIMIT $1"
+	} else {
+		querySQL = "SELECT COALESCE(queryid, 0)::bigint, COALESCE(query, ''), " +
+			"calls, total_time, (total_time / NULLIF(calls, 0)), 0.0, rows, " +
+			"shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written, " +
+			"temp_blks_written " +
+			"FROM pg_stat_statements " +
+			"ORDER BY total_time DESC " +
+			"LIMIT $1"
+	}
+
+	rows, err := c.q.Query(ctx, querySQL, limit)
+	if err != nil {
+		return rep, err
+	}
+	defer rows.Close()
+
+	rep.Queries = make([]model.TopQuery, 0)
+	for rows.Next() {
+		var q model.TopQuery
+		if err := rows.Scan(
+			&q.QueryID, &q.Query, &q.Calls,
+			&q.TotalExecTimeMs, &q.MeanExecTimeMs, &q.MaxExecTimeMs,
+			&q.Rows, &q.SharedBlksHit, &q.SharedBlksRead,
+			&q.SharedBlksDirtied, &q.SharedBlksWritten, &q.TempBlksWritten,
+		); err != nil {
+			return rep, err
+		}
+		q.Query = c.trim(q.Query, 200)
+		rep.Queries = append(rep.Queries, q)
+	}
+	return rep, rows.Err()
+}

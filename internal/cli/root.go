@@ -143,6 +143,8 @@ func init() {
 	RootCmd.AddCommand(databasesCmd)
 	RootCmd.AddCommand(indexesCmd)
 	RootCmd.AddCommand(xidCmd)
+	RootCmd.AddCommand(cacheCmd)
+	RootCmd.AddCommand(topQueriesCmd)
 	RootCmd.AddCommand(configCmd)
 	RootCmd.AddCommand(rulesCmd)
 	RootCmd.AddCommand(versionCmd)

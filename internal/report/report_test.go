@@ -212,4 +212,78 @@ func TestHumanXID(t *testing.T) {
 	}
 }
 
+func TestHumanCache(t *testing.T) {
+	r := sampleReport()
+	r.Command = "cache"
+	r.Data = CacheData{
+		Cache: model.CacheReport{
+			DatabaseName:  "app",
+			OverallRatio:  98.50,
+			HeapHitRatio:  98.10,
+			IndexHitRatio: 99.20,
+			ToastHitRatio: 100.0,
+			Tables: []model.TableCacheInfo{
+				{Schema: "public", Table: "orders", HeapReads: 1200, HeapHits: 50000, HeapHitRatio: 97.6, IndexReads: 300, IndexHits: 20000, IndexHitRatio: 98.5},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Human(&buf, r, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Buffer Cache Hit Ratio") {
+		t.Errorf("output missing Cache header:\n%s", out)
+	}
+	if !strings.Contains(out, "Overall hit ratio") || !strings.Contains(out, "98.50%") {
+		t.Errorf("output missing overall ratio:\n%s", out)
+	}
+	if !strings.Contains(out, "orders") || !strings.Contains(out, "97.6%") {
+		t.Errorf("output missing table stats:\n%s", out)
+	}
+}
+
+func TestHumanTopQueries(t *testing.T) {
+	r := sampleReport()
+	r.Command = "top-queries"
+	r.Data = TopQueriesData{
+		TopQueries: model.TopQueriesReport{
+			ExtensionAvailable: true,
+			StatementsCount:    25,
+			Queries: []model.TopQuery{
+				{QueryID: 98765, Query: "SELECT * FROM users WHERE active = true", Calls: 500, MeanExecTimeMs: 150.0, TotalExecTimeMs: 75000.0, Rows: 500, SharedBlksHit: 900, SharedBlksRead: 100, TempBlksWritten: 50},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := Human(&buf, r, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Top Slow Queries") {
+		t.Errorf("output missing TopQueries header:\n%s", out)
+	}
+	if !strings.Contains(out, "98765") || !strings.Contains(out, "users") {
+		t.Errorf("output missing query data:\n%s", out)
+	}
+	if !strings.Contains(out, "150.0ms") {
+		t.Errorf("output missing formatted mean execution time:\n%s", out)
+	}
+
+	// Test missing extension output
+	rNoExt := sampleReport()
+	rNoExt.Command = "top-queries"
+	rNoExt.Data = TopQueriesData{
+		TopQueries: model.TopQueriesReport{ExtensionAvailable: false},
+	}
+	var bufNoExt bytes.Buffer
+	if err := Human(&bufNoExt, rNoExt, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(bufNoExt.String(), "extension is not installed") {
+		t.Errorf("output missing extension not installed warning:\n%s", bufNoExt.String())
+	}
+}
+
 var _ = Options{} // Options is a value type used above
+

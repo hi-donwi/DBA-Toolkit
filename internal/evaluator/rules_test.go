@@ -423,3 +423,156 @@ func TestEvaluateXID(t *testing.T) {
 		t.Error("expected XID-001 finding for critical wraparound risk")
 	}
 }
+
+func TestEvaluateCache(t *testing.T) {
+	th := DefaultThresholds() // warn 95.0, crit 90.0
+
+	// 1. Empty cache report
+	emptyFs := EvaluateCache(model.CacheReport{}, th)
+	if len(emptyFs) != 1 || emptyFs[0].ID != "CACHE-003" || emptyFs[0].Severity != model.SeverityInfo {
+		t.Errorf("empty cache report expected 1 INFO finding, got: %+v", emptyFs)
+	}
+
+	// 2. Healthy cache report (all > 95%)
+	healthyRep := model.CacheReport{
+		DatabaseName:  "app_prod",
+		HeapHitRatio:  99.2,
+		IndexHitRatio: 99.8,
+		ToastHitRatio: 100.0,
+		OverallRatio:  99.5,
+		Tables: []model.TableCacheInfo{
+			{Schema: "public", Table: "users", HeapReads: 10, HeapHits: 10000, HeapHitRatio: 99.9, IndexReads: 5, IndexHits: 20000, IndexHitRatio: 99.9},
+		},
+	}
+	healthyFs := EvaluateCache(healthyRep, th)
+	for _, f := range healthyFs {
+		if f.Severity != model.SeverityPass {
+			t.Errorf("expected PASS severity for healthy cache, got %s for %s", f.Severity, f.ID)
+		}
+	}
+
+	// 3. Warning overall hit ratio (92.0%)
+	warnRep := model.CacheReport{
+		DatabaseName: "app_prod",
+		OverallRatio: 92.0,
+	}
+	warnFs := EvaluateCache(warnRep, th)
+	var hasWarn bool
+	for _, f := range warnFs {
+		if f.ID == "CACHE-001" && f.Severity == model.SeverityWarning {
+			hasWarn = true
+		}
+	}
+	if !hasWarn {
+		t.Errorf("expected CACHE-001 WARNING for 92%% hit ratio, got: %+v", warnFs)
+	}
+
+	// 4. Critical overall hit ratio (82.0%) and table misses
+	critRep := model.CacheReport{
+		DatabaseName: "app_prod",
+		OverallRatio: 82.0,
+		Tables: []model.TableCacheInfo{
+			{Schema: "public", Table: "orders", HeapReads: 50000, HeapHits: 1000, HeapHitRatio: 1.96, IndexReads: 20000, IndexHits: 500, IndexHitRatio: 2.44},
+		},
+	}
+	critFs := EvaluateCache(critRep, th)
+	var hasCrit, hasTableWarnHeap, hasTableWarnIdx bool
+	for _, f := range critFs {
+		if f.ID == "CACHE-001" && f.Severity == model.SeverityCritical {
+			hasCrit = true
+		}
+		if f.ID == "CACHE-002" {
+			if strings.Contains(strings.ToLower(f.Title), "heap") {
+				hasTableWarnHeap = true
+			}
+			if strings.Contains(strings.ToLower(f.Title), "index") {
+				hasTableWarnIdx = true
+			}
+		}
+	}
+	if !hasCrit {
+		t.Error("expected CACHE-001 CRITICAL for 82% hit ratio")
+	}
+	if !hasTableWarnHeap || !hasTableWarnIdx {
+		t.Errorf("expected CACHE-002 findings for both heap and index, got heap=%v idx=%v", hasTableWarnHeap, hasTableWarnIdx)
+	}
+}
+
+func TestEvaluateTopQueries(t *testing.T) {
+	th := DefaultThresholds() // warn 500ms, crit 2s
+
+	// 1. Extension not available
+	noExtRep := model.TopQueriesReport{ExtensionAvailable: false}
+	noExtFs := EvaluateTopQueries(noExtRep, th)
+	if len(noExtFs) != 1 || noExtFs[0].ID != "TOPQ-001" || noExtFs[0].Severity != model.SeverityWarning {
+		t.Errorf("expected TOPQ-001 WARNING for missing extension, got: %+v", noExtFs)
+	}
+	if !strings.Contains(noExtFs[0].Recommendation, "shared_preload_libraries") {
+		t.Errorf("expected recommendation to mention shared_preload_libraries, got: %q", noExtFs[0].Recommendation)
+	}
+
+	// 2. No statements tracked
+	emptyRep := model.TopQueriesReport{ExtensionAvailable: true, StatementsCount: 0}
+	emptyFs := EvaluateTopQueries(emptyRep, th)
+	if len(emptyFs) != 1 || emptyFs[0].ID != "TOPQ-004" || emptyFs[0].Severity != model.SeverityPass {
+		t.Errorf("expected TOPQ-004 PASS for empty statements, got: %+v", emptyFs)
+	}
+
+	// 3. Fast queries with no spills
+	fastRep := model.TopQueriesReport{
+		ExtensionAvailable: true,
+		StatementsCount:    10,
+		Queries: []model.TopQuery{
+			{QueryID: 101, Query: "SELECT 1", Calls: 1000, MeanExecTimeMs: 1.5, TotalExecTimeMs: 1500.0, TempBlksWritten: 0},
+		},
+	}
+	fastFs := EvaluateTopQueries(fastRep, th)
+	if len(fastFs) != 1 || fastFs[0].ID != "TOPQ-004" || fastFs[0].Severity != model.SeverityPass {
+		t.Errorf("expected TOPQ-004 PASS for fast queries, got: %+v", fastFs)
+	}
+
+	// 4. Slow queries (warning and critical) and temp spills
+	slowRep := model.TopQueriesReport{
+		ExtensionAvailable: true,
+		StatementsCount:    50,
+		Queries: []model.TopQuery{
+			{QueryID: 201, Query: "SELECT * FROM large_table WHERE val = 1", Calls: 10, MeanExecTimeMs: 800.0, TotalExecTimeMs: 8000.0, TempBlksWritten: 0},
+			{QueryID: 202, Query: "SELECT count(*) FROM massive GROUP BY x", Calls: 5, MeanExecTimeMs: 3500.0, TotalExecTimeMs: 17500.0, TempBlksWritten: 500},
+		},
+	}
+	slowFs := EvaluateTopQueries(slowRep, th)
+	var hasWarnSlow, hasCritSlow, hasTempSpill, hasInventory bool
+	for _, f := range slowFs {
+		switch f.ID {
+		case "TOPQ-002":
+			if f.Severity == model.SeverityWarning {
+				hasWarnSlow = true
+			} else if f.Severity == model.SeverityCritical {
+				hasCritSlow = true
+			}
+		case "TOPQ-003":
+			hasTempSpill = true
+			if f.Severity != model.SeverityWarning {
+				t.Errorf("TOPQ-003 should be WARNING, got %s", f.Severity)
+			}
+		case "TOPQ-004":
+			hasInventory = true
+			if f.Severity != model.SeverityInfo {
+				t.Errorf("TOPQ-004 with issues should be INFO, got %s", f.Severity)
+			}
+		}
+	}
+	if !hasWarnSlow {
+		t.Error("expected TOPQ-002 WARNING for 800ms mean execution")
+	}
+	if !hasCritSlow {
+		t.Error("expected TOPQ-002 CRITICAL for 3500ms mean execution")
+	}
+	if !hasTempSpill {
+		t.Error("expected TOPQ-003 WARNING for 500 temp blocks written")
+	}
+	if !hasInventory {
+		t.Error("expected TOPQ-004 INFO inventory finding")
+	}
+}
+

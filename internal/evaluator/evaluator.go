@@ -36,6 +36,13 @@ var Rules = []Rule{
 	{ID: "XID-002", Title: "Autovacuum freeze age threshold", Group: "xid"},
 	{ID: "XID-003", Title: "Oldest table freeze horizon", Group: "xid"},
 	{ID: "XID-004", Title: "Transaction ID inventory", Group: "xid"},
+	{ID: "CACHE-001", Title: "Buffer cache hit ratio", Group: "cache"},
+	{ID: "CACHE-002", Title: "Table cache miss and disk reads", Group: "cache"},
+	{ID: "CACHE-003", Title: "Cache inventory", Group: "cache"},
+	{ID: "TOPQ-001", Title: "Query statistics extension", Group: "queries"},
+	{ID: "TOPQ-002", Title: "Slow query mean latency", Group: "queries"},
+	{ID: "TOPQ-003", Title: "Query temp disk spills", Group: "queries"},
+	{ID: "TOPQ-004", Title: "Top queries inventory", Group: "queries"},
 	{ID: "CFG-001", Title: "Configuration setting", Group: "configuration"},
 	{ID: "CFG-WAL-LEVEL", Title: "WAL level", Group: "configuration"},
 	{ID: "CFG-LOG-DURATION", Title: "Slow-statement logging", Group: "configuration"},
@@ -53,6 +60,10 @@ type Thresholds struct {
 	UnusedIndexMinSize   int64         // 10MB: minimum index size to flag as unused
 	XIDWarnAge           int64         // 200,000,000: warn above transaction ID age
 	XIDCritAge           int64         // 1,500,000,000: critical above transaction ID age
+	CacheHitWarnPercent  float64       // 95: warn below this %
+	CacheHitCritPercent  float64       // 90: critical below this %
+	MeanQueryWarn        time.Duration // 500ms: warn above this mean execution time
+	MeanQueryCrit        time.Duration // 2s: critical above this mean execution time
 }
 
 // DefaultThresholds returns the MVP defaults.
@@ -67,6 +78,10 @@ func DefaultThresholds() Thresholds {
 		UnusedIndexMinSize:   10 * 1024 * 1024,
 		XIDWarnAge:           200_000_000,
 		XIDCritAge:           1_500_000_000,
+		CacheHitWarnPercent:  95.0,
+		CacheHitCritPercent:  90.0,
+		MeanQueryWarn:        500 * time.Millisecond,
+		MeanQueryCrit:        2 * time.Second,
 	}
 }
 

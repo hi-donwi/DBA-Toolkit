@@ -86,4 +86,36 @@ func TestFindingIDsAreDeclared(t *testing.T) {
 		{Schema: "public", Table: "t2", Index: "i2", SizeBytes: 20000000, Scans: 0, IsUnique: false, IsValid: true},
 		{Schema: "public", Table: "t3", Index: "i3", SizeBytes: 1000, Scans: 100, IsUnique: true, IsValid: true},
 	}, DefaultThresholds()))
+	collect(EvaluateXID(model.XIDReport{
+		AutovacuumFreezeMaxAge: 200000000,
+		Databases: []model.DatabaseXIDInfo{
+			{Datname: "a", Age: 300000000, RemainingXIDs: 1800000000},
+			{Datname: "b", Age: 1600000000, RemainingXIDs: 50000000},
+		},
+		OldestTables: []model.TableXIDInfo{
+			{Schema: "public", Table: "t", Age: 300000000, SizeBytes: 1000},
+		},
+	}, DefaultThresholds()))
+	collect(EvaluateCache(model.CacheReport{
+		DatabaseName: "app",
+		OverallRatio: 88.0,
+		Tables: []model.TableCacheInfo{
+			{Schema: "public", Table: "t", HeapReads: 5000, HeapHits: 1000, HeapHitRatio: 16.6, IndexReads: 2000, IndexHits: 500, IndexHitRatio: 20.0},
+		},
+	}, DefaultThresholds()))
+	collect(EvaluateCache(model.CacheReport{}, DefaultThresholds()))
+	collect(EvaluateTopQueries(model.TopQueriesReport{
+		ExtensionAvailable: false,
+	}, DefaultThresholds()))
+	collect(EvaluateTopQueries(model.TopQueriesReport{
+		ExtensionAvailable: true,
+		StatementsCount:    2,
+		Queries: []model.TopQuery{
+			{QueryID: 1, MeanExecTimeMs: 3000.0, Calls: 10, TempBlksWritten: 100},
+			{QueryID: 2, MeanExecTimeMs: 600.0, Calls: 50, TempBlksWritten: 0},
+			{QueryID: 3, MeanExecTimeMs: 10.0, Calls: 100, TempBlksWritten: 0},
+		},
+	}, DefaultThresholds()))
+	collect(EvaluateTopQueries(model.TopQueriesReport{ExtensionAvailable: true}, DefaultThresholds()))
 }
+

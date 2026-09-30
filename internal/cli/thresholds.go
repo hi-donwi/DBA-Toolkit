@@ -18,6 +18,10 @@ var (
 	flagUnusedIndexBytes int64
 	flagXIDWarnAge       int64
 	flagXIDCritAge       int64
+	flagCacheHitWarn     float64
+	flagCacheHitCrit     float64
+	flagMeanQueryWarn    time.Duration
+	flagMeanQueryCrit    time.Duration
 )
 
 const (
@@ -30,6 +34,10 @@ const (
 	thresholdUnusedIndexMinSize = "unused-min-size"
 	thresholdXIDWarnAge         = "warn-age"
 	thresholdXIDCritAge         = "crit-age"
+	thresholdCacheHitWarn       = "cache-hit-warn"
+	thresholdCacheHitCrit       = "cache-hit-crit"
+	thresholdMeanQueryWarn      = "mean-warn"
+	thresholdMeanQueryCrit      = "mean-crit"
 )
 
 // addThresholds registers the requested threshold flags on a command.
@@ -55,6 +63,14 @@ func addThresholds(cmd *cobra.Command, names ...string) {
 			f.Int64Var(&flagXIDWarnAge, thresholdXIDWarnAge, 0, "Warn when database or table XID age exceeds this number (default 200000000 / 200M)")
 		case thresholdXIDCritAge:
 			f.Int64Var(&flagXIDCritAge, thresholdXIDCritAge, 0, "Critical when database XID age exceeds this number (default 1500000000 / 1.5B)")
+		case thresholdCacheHitWarn:
+			f.Float64Var(&flagCacheHitWarn, thresholdCacheHitWarn, 0, "Warn when buffer cache hit ratio falls below this percent (default 95.0)")
+		case thresholdCacheHitCrit:
+			f.Float64Var(&flagCacheHitCrit, thresholdCacheHitCrit, 0, "Critical when buffer cache hit ratio falls below this percent (default 90.0)")
+		case thresholdMeanQueryWarn:
+			f.DurationVar(&flagMeanQueryWarn, thresholdMeanQueryWarn, 0, "Warn when mean query execution time exceeds this duration (default 500ms)")
+		case thresholdMeanQueryCrit:
+			f.DurationVar(&flagMeanQueryCrit, thresholdMeanQueryCrit, 0, "Critical when mean query execution time exceeds this duration (default 2s)")
 		}
 	}
 }
@@ -90,5 +106,18 @@ func resolveThresholds(cmd *cobra.Command) evaluator.Thresholds {
 	if f.Changed(thresholdXIDCritAge) && flagXIDCritAge > 0 {
 		th.XIDCritAge = flagXIDCritAge
 	}
+	if f.Changed(thresholdCacheHitWarn) && flagCacheHitWarn > 0 {
+		th.CacheHitWarnPercent = flagCacheHitWarn
+	}
+	if f.Changed(thresholdCacheHitCrit) && flagCacheHitCrit > 0 {
+		th.CacheHitCritPercent = flagCacheHitCrit
+	}
+	if f.Changed(thresholdMeanQueryWarn) && flagMeanQueryWarn > 0 {
+		th.MeanQueryWarn = flagMeanQueryWarn
+	}
+	if f.Changed(thresholdMeanQueryCrit) && flagMeanQueryCrit > 0 {
+		th.MeanQueryCrit = flagMeanQueryCrit
+	}
 	return th
 }
+

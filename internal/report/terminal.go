@@ -50,6 +50,16 @@ func renderTableCommand(w io.Writer, rep *model.Report, opts Options) {
 			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Transaction ID (XID) & Wraparound"), dbSuffix(rep))
 			renderXID(w, data.XID, c)
 		}
+	case "cache":
+		if data, ok := rep.Data.(CacheData); ok {
+			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Buffer Cache Hit Ratio"), dbSuffix(rep))
+			renderCache(w, data.Cache, c)
+		}
+	case "top-queries":
+		if data, ok := rep.Data.(TopQueriesData); ok {
+			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Top Slow Queries (pg_stat_statements)"), dbSuffix(rep))
+			renderTopQueries(w, data.TopQueries, c)
+		}
 	}
 	if len(rep.Findings) > 0 {
 		fmt.Fprintln(w)
@@ -208,3 +218,67 @@ func oneLine(s string) string {
 	}
 	return s
 }
+
+func renderCache(w io.Writer, cache model.CacheReport, c colors) {
+	fmt.Fprintf(w, "%-20s %.2f%%\n", "Overall hit ratio", cache.OverallRatio)
+	fmt.Fprintf(w, "%-20s %.2f%%\n", "Heap hit ratio", cache.HeapHitRatio)
+	fmt.Fprintf(w, "%-20s %.2f%%\n", "Index hit ratio", cache.IndexHitRatio)
+	fmt.Fprintf(w, "%-20s %.2f%%\n", "Toast hit ratio", cache.ToastHitRatio)
+
+	if len(cache.Tables) == 0 {
+		fmt.Fprintln(w, "\nNo table cache statistics.")
+		return
+	}
+
+	fmt.Fprintf(w, "\n%s\n", c.Bold("Top tables by disk reads:"))
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "SCHEMA\tTABLE\tHEAP READS\tHEAP HITS\tHEAP HIT %\tIDX READS\tIDX HITS\tIDX HIT %")
+	for _, t := range cache.Tables {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%.1f%%\t%s\t%s\t%.1f%%\n",
+			t.Schema, t.Table,
+			humanInt(t.HeapReads), humanInt(t.HeapHits), t.HeapHitRatio,
+			humanInt(t.IndexReads), humanInt(t.IndexHits), t.IndexHitRatio)
+	}
+	tw.Flush()
+}
+
+func renderTopQueries(w io.Writer, topQ model.TopQueriesReport, c colors) {
+	if !topQ.ExtensionAvailable {
+		fmt.Fprintln(w, c.Yellow("pg_stat_statements extension is not installed."))
+		return
+	}
+	fmt.Fprintf(w, "%-24s %s\n", "Tracked statements", humanInt(int64(topQ.StatementsCount)))
+	if len(topQ.Queries) == 0 {
+		fmt.Fprintln(w, "\nNo slow query statements recorded.")
+		return
+	}
+
+	fmt.Fprintf(w, "\n%s\n", c.Bold("Top statements by execution time:"))
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "QUERY ID\tCALLS\tMEAN TIME\tTOTAL TIME\tROWS\tSHARED HIT %\tTEMP BLKS\tQUERY")
+	for _, q := range topQ.Queries {
+		sharedTotal := q.SharedBlksHit + q.SharedBlksRead
+		hitRatio := 100.0
+		if sharedTotal > 0 {
+			hitRatio = float64(q.SharedBlksHit) / float64(sharedTotal) * 100.0
+		}
+		meanStr := fmtMs(q.MeanExecTimeMs)
+		totalStr := fmtMs(q.TotalExecTimeMs)
+		tempStr := humanInt(q.TempBlksWritten)
+		if q.TempBlksWritten > 0 {
+			tempStr = c.Yellow(tempStr)
+		}
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%.1f%%\t%s\t%s\n",
+			q.QueryID, humanInt(q.Calls), meanStr, totalStr,
+			humanInt(q.Rows), hitRatio, tempStr, oneLine(q.Query))
+	}
+	tw.Flush()
+}
+
+func fmtMs(ms float64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%.1fms", ms)
+	}
+	return fmtDur(ms / 1000.0)
+}
+

@@ -386,6 +386,40 @@ const (
 		"AND n.nspname !~ '^pg_temp' " +
 		"ORDER BY 3 DESC, 2 ASC " +
 		"LIMIT $1"
+	cacheDbQuery = "SELECT current_database(), " +
+		"COALESCE(sum(heap_blks_hit)::float8 / NULLIF(sum(heap_blks_hit) + sum(heap_blks_read), 0) * 100, 100), " +
+		"COALESCE(sum(idx_blks_hit)::float8 / NULLIF(sum(idx_blks_hit) + sum(idx_blks_read), 0) * 100, 100), " +
+		"COALESCE(sum(toast_blks_hit)::float8 / NULLIF(sum(toast_blks_hit) + sum(toast_blks_read), 0) * 100, 100) " +
+		"FROM pg_statio_user_tables"
+	cacheTotalQuery = "SELECT COALESCE(sum(heap_blks_hit + idx_blks_hit), 0)::bigint, " +
+		"COALESCE(sum(heap_blks_read + idx_blks_read), 0)::bigint " +
+		"FROM pg_statio_user_tables"
+	cacheTablesQuery = "SELECT COALESCE(schemaname, ''), COALESCE(relname, ''), " +
+		"COALESCE(heap_blks_read, 0)::bigint, COALESCE(heap_blks_hit, 0)::bigint, " +
+		"COALESCE(heap_blks_hit::float8 / NULLIF(heap_blks_hit + heap_blks_read, 0) * 100, 100), " +
+		"COALESCE(idx_blks_read, 0)::bigint, COALESCE(idx_blks_hit, 0)::bigint, " +
+		"COALESCE(idx_blks_hit::float8 / NULLIF(idx_blks_hit + idx_blks_read, 0) * 100, 100) " +
+		"FROM pg_statio_user_tables " +
+		"ORDER BY (heap_blks_read + idx_blks_read) DESC, (heap_blks_hit + idx_blks_hit) DESC " +
+		"LIMIT $1"
+	topQueriesExtQuery   = "SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements')"
+	topQueriesCountQuery = "SELECT count(*)::int FROM pg_stat_statements"
+	topQueriesColQuery   = "SELECT EXISTS (SELECT 1 FROM information_schema.columns " +
+		"WHERE table_name = 'pg_stat_statements' AND column_name = 'total_exec_time')"
+	topQueriesExecSQL = "SELECT COALESCE(queryid, 0)::bigint, COALESCE(query, ''), " +
+		"calls, total_exec_time, mean_exec_time, max_exec_time, rows, " +
+		"shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written, " +
+		"temp_blks_written " +
+		"FROM pg_stat_statements " +
+		"ORDER BY total_exec_time DESC " +
+		"LIMIT $1"
+	topQueriesLegacySQL = "SELECT COALESCE(queryid, 0)::bigint, COALESCE(query, ''), " +
+		"calls, total_time, (total_time / NULLIF(calls, 0)), 0.0, rows, " +
+		"shared_blks_hit, shared_blks_read, shared_blks_dirtied, shared_blks_written, " +
+		"temp_blks_written " +
+		"FROM pg_stat_statements " +
+		"ORDER BY total_time DESC " +
+		"LIMIT $1"
 )
 
 func TestCollectorIndexes(t *testing.T) {
@@ -463,3 +497,129 @@ func TestCollectorXID(t *testing.T) {
 		t.Errorf("OldestTables[0] mismatch: %+v", got.OldestTables[0])
 	}
 }
+
+func TestCollectorCache(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			cacheDbQuery:    {"app_prod", 98.5, 99.2, 100.0},
+			cacheTotalQuery: {int64(98000), int64(2000)},
+		},
+		query: map[string]fakeRows{
+			cacheTablesQuery: {
+				rows: []fakeRow{
+					{"public", "orders", int64(1500), int64(50000), 97.08, int64(300), int64(20000), 98.52},
+					{"public", "logs", int64(5000), int64(1000), 16.66, int64(100), int64(200), 66.66},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.Cache(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.DatabaseName != "app_prod" {
+		t.Errorf("DatabaseName got %q, want app_prod", got.DatabaseName)
+	}
+	if got.HeapHitRatio != 98.5 || got.IndexHitRatio != 99.2 || got.ToastHitRatio != 100.0 {
+		t.Errorf("ratios mismatch: %+v", got)
+	}
+	if got.OverallRatio != 98.0 {
+		t.Errorf("OverallRatio got %v, want 98.0", got.OverallRatio)
+	}
+	if len(got.Tables) != 2 {
+		t.Fatalf("expected 2 tables, got %d", len(got.Tables))
+	}
+	if got.Tables[0].Table != "orders" || got.Tables[0].HeapHits != 50000 {
+		t.Errorf("table[0] mismatch: %+v", got.Tables[0])
+	}
+}
+
+func TestCollectorTopQueries(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			topQueriesExtQuery:   {true},
+			topQueriesCountQuery: {42},
+			topQueriesColQuery:   {true},
+		},
+		query: map[string]fakeRows{
+			topQueriesExecSQL: {
+				rows: []fakeRow{
+					{int64(123456), "SELECT * FROM orders WHERE id = $1", int64(1000), 125000.0, 125.0, 1200.0, int64(1000), int64(9500), int64(500), int64(10), int64(5), int64(0)},
+					{int64(789012), "SELECT count(*) FROM big_table GROUP BY category", int64(50), 300000.0, 6000.0, 8500.0, int64(500), int64(200), int64(4000), int64(0), int64(0), int64(800)},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.TopQueries(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.ExtensionAvailable {
+		t.Fatalf("expected ExtensionAvailable true")
+	}
+	if got.StatementsCount != 42 {
+		t.Errorf("StatementsCount got %d, want 42", got.StatementsCount)
+	}
+	if len(got.Queries) != 2 {
+		t.Fatalf("expected 2 queries, got %d", len(got.Queries))
+	}
+	if got.Queries[0].QueryID != 123456 || got.Queries[0].Calls != 1000 || got.Queries[0].MeanExecTimeMs != 125.0 {
+		t.Errorf("query[0] mismatch: %+v", got.Queries[0])
+	}
+	if got.Queries[1].TempBlksWritten != 800 {
+		t.Errorf("query[1] TempBlksWritten got %d, want 800", got.Queries[1].TempBlksWritten)
+	}
+}
+
+func TestCollectorTopQueries_NoExtension(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			topQueriesExtQuery: {false},
+		},
+	}
+	c := New(q)
+	got, err := c.TopQueries(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.ExtensionAvailable {
+		t.Errorf("expected ExtensionAvailable false")
+	}
+	if len(got.Queries) != 0 {
+		t.Errorf("expected 0 queries, got %d", len(got.Queries))
+	}
+}
+
+func TestCollectorTopQueries_Legacy(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			topQueriesExtQuery:   {true},
+			topQueriesCountQuery: {10},
+			topQueriesColQuery:   {false}, // legacy PG <= 12
+		},
+		query: map[string]fakeRows{
+			topQueriesLegacySQL: {
+				rows: []fakeRow{
+					{int64(999), "SELECT 1", int64(10), 50.0, 5.0, 0.0, int64(10), int64(10), int64(0), int64(0), int64(0), int64(0)},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.TopQueries(context.Background(), 5)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.ExtensionAvailable {
+		t.Fatalf("expected ExtensionAvailable true")
+	}
+	if len(got.Queries) != 1 {
+		t.Fatalf("expected 1 query, got %d", len(got.Queries))
+	}
+	if got.Queries[0].QueryID != 999 || got.Queries[0].TotalExecTimeMs != 50.0 {
+		t.Errorf("query mismatch: %+v", got.Queries[0])
+	}
+}
+

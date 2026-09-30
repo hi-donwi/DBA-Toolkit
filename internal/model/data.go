@@ -126,3 +126,48 @@ type XIDReport struct {
 	OldestTables           []TableXIDInfo    `json:"oldest_tables"`
 	AutovacuumFreezeMaxAge int64             `json:"autovacuum_freeze_max_age"`
 }
+
+// TableCacheInfo records buffer cache hits and disk reads for one table.
+type TableCacheInfo struct {
+	Schema        string  `json:"schema"`
+	Table         string  `json:"table"`
+	HeapReads     int64   `json:"heap_reads"`
+	HeapHits      int64   `json:"heap_hits"`
+	HeapHitRatio  float64 `json:"heap_hit_ratio"`
+	IndexReads    int64   `json:"index_reads"`
+	IndexHits     int64   `json:"index_hits"`
+	IndexHitRatio float64 `json:"index_hit_ratio"`
+}
+
+// CacheReport combines database-level cache hit ratios and per-table breakdowns.
+type CacheReport struct {
+	DatabaseName  string           `json:"database_name"`
+	HeapHitRatio  float64          `json:"heap_hit_ratio"`
+	IndexHitRatio float64          `json:"index_hit_ratio"`
+	ToastHitRatio float64          `json:"toast_hit_ratio"`
+	OverallRatio  float64          `json:"overall_hit_ratio"`
+	Tables        []TableCacheInfo `json:"tables"`
+}
+
+// TopQuery records execution metrics from pg_stat_statements for one normalized query.
+type TopQuery struct {
+	QueryID           int64   `json:"query_id"`
+	Query             string  `json:"query"`
+	Calls             int64   `json:"calls"`
+	TotalExecTimeMs   float64 `json:"total_exec_time_ms"`
+	MeanExecTimeMs    float64 `json:"mean_exec_time_ms"`
+	MaxExecTimeMs     float64 `json:"max_exec_time_ms"`
+	Rows              int64   `json:"rows"`
+	SharedBlksHit     int64   `json:"shared_blks_hit"`
+	SharedBlksRead    int64   `json:"shared_blks_read"`
+	SharedBlksDirtied int64   `json:"shared_blks_dirtied"`
+	SharedBlksWritten int64   `json:"shared_blks_written"`
+	TempBlksWritten   int64   `json:"temp_blks_written"`
+}
+
+// TopQueriesReport holds normalized query statistics from pg_stat_statements.
+type TopQueriesReport struct {
+	ExtensionAvailable bool       `json:"extension_available"`
+	StatementsCount    int        `json:"statements_count"`
+	Queries            []TopQuery `json:"queries"`
+}
