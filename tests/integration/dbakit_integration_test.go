@@ -32,19 +32,35 @@ func TestMain(m *testing.M) {
 		fmt.Println("SKIP: docker not available")
 		os.Exit(0)
 	}
-	cmd := exec.Command("go", "build", "-tags", "integration", "-o", binary, "../..")
-	cmd.Dir = repoRoot()
+	root := repoRoot()
+	cmd := exec.Command("go", "build", "-tags", "integration", "-o", binary, "./cmd/dbakit")
+	cmd.Dir = root
 	cmd.Env = os.Environ()
 	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Printf("build failed: %v\n%s\n", err, out)
+		fmt.Printf("build failed (repo root: %s): %v\n%s\n", root, err, out)
 		os.Exit(1)
 	}
 	os.Exit(m.Run())
 }
 
+// repoRoot walks up from the working directory to find the directory containing
+// go.mod, which is the repository root. The previous implementation used
+// filepath.Dir(wd) which returned tests/ instead of the actual root.
 func repoRoot() string {
-	wd, _ := os.Getwd()
-	return filepath.Dir(wd)
+	dir, err := os.Getwd()
+	if err != nil {
+		panic("cannot determine working directory: " + err.Error())
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			panic("repoRoot: go.mod not found in any parent directory")
+		}
+		dir = parent
+	}
 }
 
 func run(t *testing.T, args ...string) (map[string]any, string) {
