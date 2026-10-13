@@ -22,6 +22,7 @@ var (
 	flagCacheHitCrit       float64
 	flagMeanQueryWarn      time.Duration
 	flagMeanQueryCrit      time.Duration
+	flagMinQueryCalls      int64
 	flagBloatDeadWarnRatio float64
 	flagBloatDeadCritRatio float64
 	flagBloatMinDeadTuples int64
@@ -41,6 +42,7 @@ const (
 	thresholdCacheHitCrit       = "cache-hit-crit"
 	thresholdMeanQueryWarn      = "mean-warn"
 	thresholdMeanQueryCrit      = "mean-crit"
+	thresholdMinQueryCalls      = "min-calls"
 	thresholdBloatDeadWarn      = "dead-ratio-warn"
 	thresholdBloatDeadCrit      = "dead-ratio-crit"
 	thresholdBloatMinDead       = "min-dead-tuples"
@@ -77,6 +79,8 @@ func addThresholds(cmd *cobra.Command, names ...string) {
 			f.DurationVar(&flagMeanQueryWarn, thresholdMeanQueryWarn, 0, "Warn when mean query execution time exceeds this duration (default 500ms)")
 		case thresholdMeanQueryCrit:
 			f.DurationVar(&flagMeanQueryCrit, thresholdMeanQueryCrit, 0, "Critical when mean query execution time exceeds this duration (default 2s)")
+		case thresholdMinQueryCalls:
+			f.Int64Var(&flagMinQueryCalls, thresholdMinQueryCalls, 0, "Minimum query executions before flagging slow query mean time (default 5)")
 		case thresholdBloatDeadWarn:
 			f.Float64Var(&flagBloatDeadWarnRatio, thresholdBloatDeadWarn, 0, "Warn when table dead tuple ratio exceeds this percent (default 20.0)")
 		case thresholdBloatDeadCrit:
@@ -129,6 +133,9 @@ func resolveThresholds(cmd *cobra.Command) evaluator.Thresholds {
 	}
 	if f.Changed(thresholdMeanQueryCrit) && flagMeanQueryCrit > 0 {
 		th.MeanQueryCrit = flagMeanQueryCrit
+	}
+	if f.Changed(thresholdMinQueryCalls) && flagMinQueryCalls > 0 {
+		th.MinQueryCalls = flagMinQueryCalls
 	}
 	if f.Changed(thresholdBloatDeadWarn) && flagBloatDeadWarnRatio > 0 {
 		th.BloatDeadWarnRatio = flagBloatDeadWarnRatio

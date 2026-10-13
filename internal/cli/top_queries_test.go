@@ -17,7 +17,7 @@ func TestTopQueriesCmdStructure(t *testing.T) {
 			t.Errorf("missing alias %s", want)
 		}
 	}
-	for _, wantFlag := range []string{"limit", "mean-warn", "mean-crit"} {
+	for _, wantFlag := range []string{"limit", "mean-warn", "mean-crit", "min-calls"} {
 		if topQueriesCmd.Flags().Lookup(wantFlag) == nil {
 			t.Errorf("missing flag %s", wantFlag)
 		}

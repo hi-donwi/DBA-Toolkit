@@ -35,6 +35,10 @@ func EvaluateTopQueries(rep model.TopQueriesReport, th Thresholds) []model.Findi
 	if critTh <= 0 {
 		critTh = 2 * time.Second
 	}
+	minCalls := th.MinQueryCalls
+	if minCalls <= 0 {
+		minCalls = 5
+	}
 
 	out := make([]model.Finding, 0)
 	var hasIssue bool
@@ -42,31 +46,33 @@ func EvaluateTopQueries(rep model.TopQueriesReport, th Thresholds) []model.Findi
 	for _, q := range rep.Queries {
 		meanDur := time.Duration(q.MeanExecTimeMs * float64(time.Millisecond))
 
-		// TOPQ-002: Slow query mean latency
-		if meanDur >= critTh {
-			hasIssue = true
-			out = append(out, finding("TOPQ-002", model.SeverityCritical,
-				fmt.Sprintf("Critical slow query (query ID %d)", q.QueryID),
-				fmt.Sprintf("Query has mean execution time of %s (%d calls, %s total)",
-					fmtDur(q.MeanExecTimeMs/1000.0), q.Calls, fmtDur(q.TotalExecTimeMs/1000.0)),
-				WithEvidence(fmt.Sprintf("Query ID: %d\nCalls: %d\nMean time: %.2f ms\nMax time: %.2f ms\nTotal time: %.2f ms\nRows: %d\nQuery: %s",
-					q.QueryID, q.Calls, q.MeanExecTimeMs, q.MaxExecTimeMs, q.TotalExecTimeMs, q.Rows, q.Query)),
-				WithRecommendation("Analyze the slow query with EXPLAIN (ANALYZE, BUFFERS) to find full table scans, suboptimal joins, or missing indexes."),
-				WithMetadata("query_id", fmt.Sprintf("%d", q.QueryID)),
-				WithMetadata("calls", fmt.Sprintf("%d", q.Calls)),
-				WithMetadata("mean_time_ms", fmt.Sprintf("%.2f", q.MeanExecTimeMs))))
-		} else if meanDur >= warnTh {
-			hasIssue = true
-			out = append(out, finding("TOPQ-002", model.SeverityWarning,
-				fmt.Sprintf("Slow query (query ID %d)", q.QueryID),
-				fmt.Sprintf("Query has mean execution time of %s (%d calls, %s total)",
-					fmtDur(q.MeanExecTimeMs/1000.0), q.Calls, fmtDur(q.TotalExecTimeMs/1000.0)),
-				WithEvidence(fmt.Sprintf("Query ID: %d\nCalls: %d\nMean time: %.2f ms\nMax time: %.2f ms\nTotal time: %.2f ms\nRows: %d\nQuery: %s",
-					q.QueryID, q.Calls, q.MeanExecTimeMs, q.MaxExecTimeMs, q.TotalExecTimeMs, q.Rows, q.Query)),
-				WithRecommendation("Review execution plan with EXPLAIN to evaluate whether indexes or query refactoring can improve latency."),
-				WithMetadata("query_id", fmt.Sprintf("%d", q.QueryID)),
-				WithMetadata("calls", fmt.Sprintf("%d", q.Calls)),
-				WithMetadata("mean_time_ms", fmt.Sprintf("%.2f", q.MeanExecTimeMs))))
+		// TOPQ-002: Slow query mean latency (ignore one-shot statements with calls < minCalls)
+		if q.Calls >= minCalls {
+			if meanDur >= critTh {
+				hasIssue = true
+				out = append(out, finding("TOPQ-002", model.SeverityCritical,
+					fmt.Sprintf("Critical slow query (query ID %d)", q.QueryID),
+					fmt.Sprintf("Query has mean execution time of %s (%d calls, %s total)",
+						fmtDur(q.MeanExecTimeMs/1000.0), q.Calls, fmtDur(q.TotalExecTimeMs/1000.0)),
+					WithEvidence(fmt.Sprintf("Query ID: %d\nCalls: %d\nMean time: %.2f ms\nMax time: %.2f ms\nTotal time: %.2f ms\nRows: %d\nQuery: %s",
+						q.QueryID, q.Calls, q.MeanExecTimeMs, q.MaxExecTimeMs, q.TotalExecTimeMs, q.Rows, q.Query)),
+					WithRecommendation("Analyze the slow query with EXPLAIN (ANALYZE, BUFFERS) to find full table scans, suboptimal joins, or missing indexes."),
+					WithMetadata("query_id", fmt.Sprintf("%d", q.QueryID)),
+					WithMetadata("calls", fmt.Sprintf("%d", q.Calls)),
+					WithMetadata("mean_time_ms", fmt.Sprintf("%.2f", q.MeanExecTimeMs))))
+			} else if meanDur >= warnTh {
+				hasIssue = true
+				out = append(out, finding("TOPQ-002", model.SeverityWarning,
+					fmt.Sprintf("Slow query (query ID %d)", q.QueryID),
+					fmt.Sprintf("Query has mean execution time of %s (%d calls, %s total)",
+						fmtDur(q.MeanExecTimeMs/1000.0), q.Calls, fmtDur(q.TotalExecTimeMs/1000.0)),
+					WithEvidence(fmt.Sprintf("Query ID: %d\nCalls: %d\nMean time: %.2f ms\nMax time: %.2f ms\nTotal time: %.2f ms\nRows: %d\nQuery: %s",
+						q.QueryID, q.Calls, q.MeanExecTimeMs, q.MaxExecTimeMs, q.TotalExecTimeMs, q.Rows, q.Query)),
+					WithRecommendation("Review execution plan with EXPLAIN to evaluate whether indexes or query refactoring can improve latency."),
+					WithMetadata("query_id", fmt.Sprintf("%d", q.QueryID)),
+					WithMetadata("calls", fmt.Sprintf("%d", q.Calls)),
+					WithMetadata("mean_time_ms", fmt.Sprintf("%.2f", q.MeanExecTimeMs))))
+			}
 		}
 
 		// TOPQ-003: Query temp disk spills

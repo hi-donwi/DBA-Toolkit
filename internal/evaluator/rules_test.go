@@ -574,6 +574,21 @@ func TestEvaluateTopQueries(t *testing.T) {
 	if !hasInventory {
 		t.Error("expected TOPQ-004 INFO inventory finding")
 	}
+
+	// 5. One-shot setup query with calls < minCalls should NOT trigger TOPQ-002
+	oneShotRep := model.TopQueriesReport{
+		ExtensionAvailable: true,
+		StatementsCount:    10,
+		Queries: []model.TopQuery{
+			{QueryID: 301, Query: "COPY initial_data FROM stdin", Calls: 1, MeanExecTimeMs: 590.0, TotalExecTimeMs: 590.0},
+		},
+	}
+	oneShotFs := EvaluateTopQueries(oneShotRep, th)
+	for _, f := range oneShotFs {
+		if f.ID == "TOPQ-002" {
+			t.Errorf("one-shot setup query with 1 call should not trigger TOPQ-002: %+v", f)
+		}
+	}
 }
 
 func TestEvaluateBloat(t *testing.T) {

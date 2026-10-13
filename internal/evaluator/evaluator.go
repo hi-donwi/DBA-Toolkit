@@ -67,6 +67,7 @@ type Thresholds struct {
 	CacheHitCritPercent  float64       // 90: critical below this %
 	MeanQueryWarn        time.Duration // 500ms: warn above this mean execution time
 	MeanQueryCrit        time.Duration // 2s: critical above this mean execution time
+	MinQueryCalls        int64         // 5: minimum calls before flagging slow query mean time
 	BloatDeadWarnRatio   float64       // 20.0%: warn when dead tuple ratio exceeds this %
 	BloatDeadCritRatio   float64       // 50.0%: critical when dead tuple ratio exceeds this %
 	BloatMinDeadTuples   int64         // 10,000: minimum dead tuples before flagging bloat
@@ -88,6 +89,7 @@ func DefaultThresholds() Thresholds {
 		CacheHitCritPercent:  90.0,
 		MeanQueryWarn:        500 * time.Millisecond,
 		MeanQueryCrit:        2 * time.Second,
+		MinQueryCalls:        5,
 		BloatDeadWarnRatio:   20.0,
 		BloatDeadCritRatio:   50.0,
 		BloatMinDeadTuples:   10_000,

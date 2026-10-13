@@ -27,7 +27,7 @@ is missing (WARNING: TOPQ-001). Read-only.`,
 
 func init() {
 	topQueriesCmd.Flags().IntVar(&flagTopQueriesLimit, "limit", 10, "Number of top statements by total execution time to inspect")
-	addThresholds(topQueriesCmd, thresholdMeanQueryWarn, thresholdMeanQueryCrit)
+	addThresholds(topQueriesCmd, thresholdMeanQueryWarn, thresholdMeanQueryCrit, thresholdMinQueryCalls)
 }
 
 func topQueriesRun(ctx context.Context, _ model.Connectivity, coll *collector.Collector, th evaluator.Thresholds) (any, []model.Finding, error) {
