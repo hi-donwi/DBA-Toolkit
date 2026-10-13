@@ -77,6 +77,8 @@ func TestRedact(t *testing.T) {
 		"host=h port=5432 dbname=n user=u password=s3cr3t sslmode=require": "password=***",
 		"postgres://alice:hunter2@db:5432/app?sslmode=require":             "postgres://alice:***@db:5432/app?sslmode=require",
 		"postgres://db:5432/app":                                           "postgres://db:5432/app",
+		"password='alpha beta'":                                            "password=***",
+		"password='p\\'w'":                                                 "password=***",
 	}
 	for input, want := range cases {
 		if got := Redact(input); !strings.Contains(got, want) {
@@ -97,6 +99,14 @@ func TestRedactedConfigIsSecretFree(t *testing.T) {
 	for _, s := range []string{"password=***", "host=db", "dbname=n"} {
 		if !strings.Contains(out, s) {
 			t.Fatalf("Redacted() missing %q: %q", s, out)
+		}
+	}
+}
+
+func TestRedactEntireQuotedOrEscapedPassword(t *testing.T) {
+	for _, input := range []string{"password='alpha beta'", "password='alpha beta", `password=alpha\ beta`} {
+		if got := Redact(input); got != "password=***" {
+			t.Errorf("Redact(%q) = %q", input, got)
 		}
 	}
 }

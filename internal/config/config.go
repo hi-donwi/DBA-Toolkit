@@ -164,14 +164,16 @@ func parsePort(s string) (int, error) {
 }
 
 var (
-	dsnPassword = regexp.MustCompile(`(?i)(password\s*=\s*)'?[^';\s]+'?`)
-	urlPassword = regexp.MustCompile(`(://[^:/@\s]+:)[^@\s]+(@)`)
+	dsnQuotedPassword   = regexp.MustCompile(`(?i)(password\s*=\s*)'(?:\\.|[^'\\])*(?:'|$)`)
+	dsnUnquotedPassword = regexp.MustCompile(`(?i)(password\s*=\s*)(?:\\.|[^'\\\s;])+`)
+	urlPassword         = regexp.MustCompile(`(://[^:/@\s]+:)[^@\s]+(@)`)
 )
 
 // Redact masks the password in any connection string, URL, or error message.
 // Use it before the string reaches a report, log, or JSON output.
 func Redact(s string) string {
-	s = dsnPassword.ReplaceAllString(s, "${1}***")
+	s = dsnQuotedPassword.ReplaceAllString(s, "${1}***")
+	s = dsnUnquotedPassword.ReplaceAllString(s, "${1}***")
 	s = urlPassword.ReplaceAllString(s, "${1}***${2}")
 	return s
 }
