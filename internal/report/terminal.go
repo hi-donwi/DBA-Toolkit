@@ -65,6 +65,11 @@ func renderTableCommand(w io.Writer, rep *model.Report, opts Options) {
 			fmt.Fprintf(w, "%s%s\n\n", c.Bold("Table Bloat & Dead Tuples"), dbSuffix(rep))
 			renderBloat(w, data.Bloat, c)
 		}
+	case "wal":
+		if data, ok := rep.Data.(WALData); ok {
+			fmt.Fprintf(w, "%s%s\n\n", c.Bold("WAL & Checkpoint Durability"), dbSuffix(rep))
+			renderWAL(w, data.WAL, c)
+		}
 	case "top":
 		if data, ok := rep.Data.(TopData); ok {
 			renderTop(w, rep, data, c, opts)
@@ -321,4 +326,39 @@ func renderBloat(w io.Writer, rep model.BloatReport, c colors) {
 			lastVac, lastAuto)
 	}
 	tw.Flush()
+}
+
+func renderWAL(w io.Writer, rep model.WALReport, c colors) {
+	fmt.Fprintf(w, "%s\n", c.Bold("Durability & Commit Settings"))
+	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(tw, "fsync:\t%s\tsynchronous_commit:\t%s\n", rep.Settings.Fsync, rep.Settings.SynchronousCommit)
+	fmt.Fprintf(tw, "full_page_writes:\t%s\twal_sync_method:\t%s\n", rep.Settings.FullPageWrites, rep.Settings.WALSyncMethod)
+	fmt.Fprintf(tw, "track_io_timing:\t%s\tcheckpoint_timeout:\t%s\n", rep.Settings.TrackIOTiming, rep.Settings.CheckpointTimeout)
+	fmt.Fprintf(tw, "max_wal_size:\t%s\tmin_wal_size:\t%s\n", rep.Settings.MaxWALSize, rep.Settings.MinWALSize)
+	tw.Flush()
+
+	fmt.Fprintf(w, "\n%s\n", c.Bold("Checkpoint Metrics"))
+	tw2 := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	totalCkpt := rep.Checkpoint.CheckpointsTimed + rep.Checkpoint.CheckpointsReq
+	forcedPct := 0.0
+	if totalCkpt > 0 {
+		forcedPct = float64(rep.Checkpoint.CheckpointsReq) / float64(totalCkpt) * 100.0
+	}
+	fmt.Fprintf(tw2, "Timed Checkpoints:\t%d\tRequested (Forced):\t%d (%.1f%%)\n",
+		rep.Checkpoint.CheckpointsTimed, rep.Checkpoint.CheckpointsReq, forcedPct)
+	fmt.Fprintf(tw2, "Write Time:\t%.2f ms\tSync Time:\t%.2f ms\n",
+		rep.Checkpoint.WriteTimeMs, rep.Checkpoint.SyncTimeMs)
+	fmt.Fprintf(tw2, "Buffers Written:\t%d\tStats Reset:\t%s\n",
+		rep.Checkpoint.BuffersCheckpoint, rep.Checkpoint.StatsReset)
+	tw2.Flush()
+
+	fmt.Fprintf(w, "\n%s\n", c.Bold("WAL Statistics"))
+	tw3 := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+	fmt.Fprintf(tw3, "WAL Records:\t%s\tWAL Full Page Images (FPI):\t%s\n",
+		humanInt(rep.WAL.Records), humanInt(rep.WAL.FPI))
+	fmt.Fprintf(tw3, "WAL Volume Bytes:\t%s\tWAL Buffers Full:\t%s\n",
+		humanBytes(rep.WAL.Bytes), humanInt(rep.WAL.BuffersFull))
+	fmt.Fprintf(tw3, "WAL Writes:\t%s (%.2f ms)\tWAL Syncs:\t%s (%.2f ms)\n",
+		humanInt(rep.WAL.WriteCount), rep.WAL.WriteTimeMs, humanInt(rep.WAL.SyncCount), rep.WAL.SyncTimeMs)
+	tw3.Flush()
 }

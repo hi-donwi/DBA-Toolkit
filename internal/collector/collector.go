@@ -578,3 +578,85 @@ func (c *Collector) TopSnapshot(ctx context.Context, maxQueryLen int) (model.Top
 
 	return snap, nil
 }
+
+// WAL collects WAL activity, durability settings, and checkpoint metrics.
+// For PostgreSQL 17+, checkpoint counters are queried from pg_stat_checkpointer;
+// for earlier releases, from pg_stat_bgwriter.
+func (c *Collector) WAL(ctx context.Context, versionNum int) (model.WALReport, error) {
+	var rep model.WALReport
+
+	// 1. Durability and checkpoint settings
+	settingsRows, err := c.q.Query(ctx,
+		"SELECT name, COALESCE(current_setting(name), '') FROM pg_settings WHERE name IN ("+
+			"'fsync', 'synchronous_commit', 'full_page_writes', 'wal_sync_method', "+
+			"'synchronous_standby_names', 'track_io_timing', 'checkpoint_timeout', "+
+			"'max_wal_size', 'min_wal_size', 'checkpoint_completion_target')")
+	if err == nil {
+		defer settingsRows.Close()
+		for settingsRows.Next() {
+			var k, v string
+			if err := settingsRows.Scan(&k, &v); err == nil {
+				switch k {
+				case "fsync":
+					rep.Settings.Fsync = v
+				case "synchronous_commit":
+					rep.Settings.SynchronousCommit = v
+				case "full_page_writes":
+					rep.Settings.FullPageWrites = v
+				case "wal_sync_method":
+					rep.Settings.WALSyncMethod = v
+				case "synchronous_standby_names":
+					rep.Settings.SynchronousStandbyNames = v
+				case "track_io_timing":
+					rep.Settings.TrackIOTiming = v
+				case "checkpoint_timeout":
+					rep.Settings.CheckpointTimeout = v
+				case "max_wal_size":
+					rep.Settings.MaxWALSize = v
+				case "min_wal_size":
+					rep.Settings.MinWALSize = v
+				case "checkpoint_completion_target":
+					rep.Settings.CheckpointCompletionTarget = v
+				}
+			}
+		}
+	}
+
+	// 2. WAL metrics from pg_stat_wal (available in PostgreSQL 14+)
+	_ = c.q.QueryRow(ctx,
+		"SELECT COALESCE(wal_records, 0)::bigint, COALESCE(wal_fpi, 0)::bigint, "+
+			"COALESCE(wal_bytes, 0)::bigint, COALESCE(wal_buffers_full, 0)::bigint, "+
+			"COALESCE(wal_write, 0)::bigint, COALESCE(wal_sync, 0)::bigint, "+
+			"COALESCE(wal_write_time, 0)::float8, COALESCE(wal_sync_time, 0)::float8, "+
+			"COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), '') "+
+			"FROM pg_stat_wal", nil,
+		&rep.WAL.Records, &rep.WAL.FPI, &rep.WAL.Bytes, &rep.WAL.BuffersFull,
+		&rep.WAL.WriteCount, &rep.WAL.SyncCount, &rep.WAL.WriteTimeMs, &rep.WAL.SyncTimeMs,
+		&rep.WAL.StatsReset)
+
+	// 3. Checkpoint metrics: PG17 moved checkpoint counters to pg_stat_checkpointer
+	if versionNum >= 170000 {
+		_ = c.q.QueryRow(ctx,
+			"SELECT COALESCE(num_timed, 0)::bigint, COALESCE(num_requested, 0)::bigint, "+
+				"COALESCE(write_time, 0)::float8, COALESCE(sync_time, 0)::float8, "+
+				"COALESCE(buffers_written, 0)::bigint, "+
+				"COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), '') "+
+				"FROM pg_stat_checkpointer", nil,
+			&rep.Checkpoint.CheckpointsTimed, &rep.Checkpoint.CheckpointsReq,
+			&rep.Checkpoint.WriteTimeMs, &rep.Checkpoint.SyncTimeMs,
+			&rep.Checkpoint.BuffersCheckpoint, &rep.Checkpoint.StatsReset)
+	} else {
+		_ = c.q.QueryRow(ctx,
+			"SELECT COALESCE(checkpoints_timed, 0)::bigint, COALESCE(checkpoints_req, 0)::bigint, "+
+				"COALESCE(checkpoint_write_time, 0)::float8, COALESCE(checkpoint_sync_time, 0)::float8, "+
+				"COALESCE(buffers_checkpoint, 0)::bigint, "+
+				"COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), '') "+
+				"FROM pg_stat_bgwriter", nil,
+			&rep.Checkpoint.CheckpointsTimed, &rep.Checkpoint.CheckpointsReq,
+			&rep.Checkpoint.WriteTimeMs, &rep.Checkpoint.SyncTimeMs,
+			&rep.Checkpoint.BuffersCheckpoint, &rep.Checkpoint.StatsReset)
+	}
+
+	return rep, nil
+}
+

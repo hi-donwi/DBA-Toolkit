@@ -49,6 +49,11 @@ var Rules = []Rule{
 	{ID: "CFG-001", Title: "Configuration setting", Group: "configuration"},
 	{ID: "CFG-WAL-LEVEL", Title: "WAL level", Group: "configuration"},
 	{ID: "CFG-LOG-DURATION", Title: "Slow-statement logging", Group: "configuration"},
+	{ID: "WAL-001", Title: "PostgreSQL fsync setting", Group: "wal"},
+	{ID: "WAL-002", Title: "PostgreSQL full_page_writes setting", Group: "wal"},
+	{ID: "WAL-003", Title: "PostgreSQL synchronous_commit setting", Group: "wal"},
+	{ID: "WAL-004", Title: "Checkpoint frequency and forced ratio", Group: "wal"},
+	{ID: "WAL-005", Title: "PostgreSQL track_io_timing setting", Group: "wal"},
 }
 
 // Thresholds carries the configurable boundaries every evaluator honours. All

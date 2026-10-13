@@ -198,3 +198,48 @@ type TopSnapshot struct {
 	Locks       []BlockingPair `json:"locks"`
 	Replication Replication    `json:"replication"`
 }
+
+// WALSettings holds durability and commit-path settings.
+type WALSettings struct {
+	Fsync                      string `json:"fsync"`
+	SynchronousCommit          string `json:"synchronous_commit"`
+	FullPageWrites             string `json:"full_page_writes"`
+	WALSyncMethod              string `json:"wal_sync_method"`
+	SynchronousStandbyNames    string `json:"synchronous_standby_names"`
+	TrackIOTiming              string `json:"track_io_timing"`
+	CheckpointTimeout          string `json:"checkpoint_timeout,omitempty"`
+	MaxWALSize                 string `json:"max_wal_size,omitempty"`
+	MinWALSize                 string `json:"min_wal_size,omitempty"`
+	CheckpointCompletionTarget string `json:"checkpoint_completion_target,omitempty"`
+}
+
+// WALStats holds metrics from pg_stat_wal.
+type WALStats struct {
+	Records     int64   `json:"records"`
+	FPI         int64   `json:"fpi"`
+	Bytes       int64   `json:"bytes"`
+	BuffersFull int64   `json:"buffers_full"`
+	WriteCount  int64   `json:"write_count"`
+	SyncCount   int64   `json:"sync_count"`
+	WriteTimeMs float64 `json:"write_time_ms"`
+	SyncTimeMs  float64 `json:"sync_time_ms"`
+	StatsReset  string  `json:"stats_reset,omitempty"`
+}
+
+// CheckpointStats holds checkpoint statistics from pg_stat_checkpointer (PG17) or pg_stat_bgwriter (<PG17).
+type CheckpointStats struct {
+	CheckpointsTimed  int64   `json:"checkpoints_timed"`
+	CheckpointsReq    int64   `json:"checkpoints_req"`
+	WriteTimeMs       float64 `json:"write_time_ms"`
+	SyncTimeMs        float64 `json:"sync_time_ms"`
+	BuffersCheckpoint int64   `json:"buffers_checkpoint"`
+	StatsReset        string  `json:"stats_reset,omitempty"`
+}
+
+// WALReport aggregates WAL, durability settings, and checkpoint activity.
+type WALReport struct {
+	Settings   WALSettings     `json:"settings"`
+	WAL        WALStats        `json:"wal"`
+	Checkpoint CheckpointStats `json:"checkpoint"`
+}
+

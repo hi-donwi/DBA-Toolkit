@@ -653,3 +653,61 @@ func TestEvaluateBloat(t *testing.T) {
 		t.Error("expected BLOAT-002 WARNING for autovacuum starvation")
 	}
 }
+
+func TestEvaluateWAL(t *testing.T) {
+	// 1. Dangerous settings: fsync=off, full_page_writes=off, synchronous_commit=off, frequent forced checkpoints
+	dangerRep := model.WALReport{
+		Settings: model.WALSettings{
+			Fsync:             "off",
+			FullPageWrites:    "off",
+			SynchronousCommit: "off",
+			TrackIOTiming:     "off",
+		},
+		Checkpoint: model.CheckpointStats{
+			CheckpointsTimed: 2,
+			CheckpointsReq:   8, // 80% forced
+		},
+	}
+	findings := EvaluateWAL(dangerRep)
+	found := make(map[string]model.Severity)
+	for _, f := range findings {
+		found[f.ID] = f.Severity
+	}
+
+	if found["WAL-001"] != model.SeverityCritical {
+		t.Errorf("expected WAL-001 CRITICAL for fsync=off, got %v", found["WAL-001"])
+	}
+	if found["WAL-002"] != model.SeverityCritical {
+		t.Errorf("expected WAL-002 CRITICAL for full_page_writes=off, got %v", found["WAL-002"])
+	}
+	if found["WAL-003"] != model.SeverityWarning {
+		t.Errorf("expected WAL-003 WARNING for synchronous_commit=off, got %v", found["WAL-003"])
+	}
+	if found["WAL-004"] != model.SeverityWarning {
+		t.Errorf("expected WAL-004 WARNING for forced checkpoints, got %v", found["WAL-004"])
+	}
+	if found["WAL-005"] != model.SeverityInfo {
+		t.Errorf("expected WAL-005 INFO for track_io_timing=off, got %v", found["WAL-005"])
+	}
+
+	// 2. Safe/healthy settings
+	safeRep := model.WALReport{
+		Settings: model.WALSettings{
+			Fsync:             "on",
+			FullPageWrites:    "on",
+			SynchronousCommit: "on",
+			TrackIOTiming:     "on",
+		},
+		Checkpoint: model.CheckpointStats{
+			CheckpointsTimed: 45,
+			CheckpointsReq:   5, // 10% forced (below 20%)
+		},
+	}
+	safeFindings := EvaluateWAL(safeRep)
+	for _, f := range safeFindings {
+		if f.Severity != model.SeverityPass {
+			t.Errorf("expected PASS severity for safe setting, got %s: %s", f.ID, f.Severity)
+		}
+	}
+}
+

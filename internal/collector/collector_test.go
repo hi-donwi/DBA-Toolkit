@@ -439,6 +439,26 @@ const (
 		"FROM pg_stat_user_tables " +
 		"ORDER BY n_dead_tup DESC, pg_total_relation_size(relid) DESC " +
 		"LIMIT $1"
+	walSettingsQuery = "SELECT name, COALESCE(current_setting(name), '') FROM pg_settings WHERE name IN (" +
+		"'fsync', 'synchronous_commit', 'full_page_writes', 'wal_sync_method', " +
+		"'synchronous_standby_names', 'track_io_timing', 'checkpoint_timeout', " +
+		"'max_wal_size', 'min_wal_size', 'checkpoint_completion_target')"
+	walStatsQuery = "SELECT COALESCE(wal_records, 0)::bigint, COALESCE(wal_fpi, 0)::bigint, " +
+		"COALESCE(wal_bytes, 0)::bigint, COALESCE(wal_buffers_full, 0)::bigint, " +
+		"COALESCE(wal_write, 0)::bigint, COALESCE(wal_sync, 0)::bigint, " +
+		"COALESCE(wal_write_time, 0)::float8, COALESCE(wal_sync_time, 0)::float8, " +
+		"COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), '') " +
+		"FROM pg_stat_wal"
+	checkpointerQueryPG17 = "SELECT COALESCE(num_timed, 0)::bigint, COALESCE(num_requested, 0)::bigint, " +
+		"COALESCE(write_time, 0)::float8, COALESCE(sync_time, 0)::float8, " +
+		"COALESCE(buffers_written, 0)::bigint, " +
+		"COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), '') " +
+		"FROM pg_stat_checkpointer"
+	checkpointerQueryPre17 = "SELECT COALESCE(checkpoints_timed, 0)::bigint, COALESCE(checkpoints_req, 0)::bigint, " +
+		"COALESCE(checkpoint_write_time, 0)::float8, COALESCE(checkpoint_sync_time, 0)::float8, " +
+		"COALESCE(buffers_checkpoint, 0)::bigint, " +
+		"COALESCE(to_char(stats_reset, 'YYYY-MM-DD HH24:MI:SS'), '') " +
+		"FROM pg_stat_bgwriter"
 )
 
 func TestCollectorIndexes(t *testing.T) {
@@ -741,3 +761,77 @@ func TestCollectorTopSnapshot(t *testing.T) {
 		t.Errorf("expected non-empty timestamp")
 	}
 }
+
+func TestCollectorWALPG17(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			walStatsQuery: {
+				int64(100000), int64(5000), int64(104857600), int64(12),
+				int64(2500), int64(2500), 1250.0, 350.0, "2026-10-01 00:00:00",
+			},
+			checkpointerQueryPG17: {
+				int64(45), int64(5), 25000.0, 1500.0, int64(12000), "2026-10-01 00:00:00",
+			},
+		},
+		query: map[string]fakeRows{
+			walSettingsQuery: {rows: []fakeRow{
+				{"fsync", "on"},
+				{"synchronous_commit", "on"},
+				{"full_page_writes", "on"},
+				{"wal_sync_method", "fdatasync"},
+				{"track_io_timing", "on"},
+				{"checkpoint_timeout", "5min"},
+				{"max_wal_size", "1GB"},
+			}},
+		},
+	}
+	c := New(q)
+	rep, err := c.WAL(context.Background(), 170000)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rep.Settings.Fsync != "on" || rep.Settings.SynchronousCommit != "on" {
+		t.Errorf("unexpected settings: %+v", rep.Settings)
+	}
+	if rep.WAL.Records != 100000 || rep.WAL.Bytes != 104857600 {
+		t.Errorf("unexpected wal stats: %+v", rep.WAL)
+	}
+	if rep.Checkpoint.CheckpointsTimed != 45 || rep.Checkpoint.CheckpointsReq != 5 {
+		t.Errorf("unexpected checkpoint stats: %+v", rep.Checkpoint)
+	}
+}
+
+func TestCollectorWALPre17(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			walStatsQuery: {
+				int64(50000), int64(2000), int64(52428800), int64(0),
+				int64(1200), int64(1200), 600.0, 150.0, "2026-10-01 00:00:00",
+			},
+			checkpointerQueryPre17: {
+				int64(20), int64(2), 10000.0, 800.0, int64(6000), "2026-10-01 00:00:00",
+			},
+		},
+		query: map[string]fakeRows{
+			walSettingsQuery: {rows: []fakeRow{
+				{"fsync", "on"},
+				{"synchronous_commit", "off"},
+				{"full_page_writes", "on"},
+				{"wal_sync_method", "fdatasync"},
+				{"track_io_timing", "off"},
+			}},
+		},
+	}
+	c := New(q)
+	rep, err := c.WAL(context.Background(), 160004)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if rep.Settings.SynchronousCommit != "off" || rep.Settings.TrackIOTiming != "off" {
+		t.Errorf("unexpected settings: %+v", rep.Settings)
+	}
+	if rep.Checkpoint.CheckpointsTimed != 20 || rep.Checkpoint.CheckpointsReq != 2 {
+		t.Errorf("unexpected checkpoint stats: %+v", rep.Checkpoint)
+	}
+}
+
