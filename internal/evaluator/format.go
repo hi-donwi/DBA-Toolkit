@@ -9,7 +9,23 @@ import (
 // "92s", 185 → "3m 5s", 7265 → "2h 1m". Used only in human-facing evidence
 // text; machine outputs always carry raw seconds.
 func fmtDur(seconds float64) string {
+	if seconds <= 0 {
+		return "0s"
+	}
 	d := time.Duration(seconds * float64(time.Second))
+	if d < time.Microsecond {
+		return "<1µs"
+	}
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	if d < time.Second {
+		ms := float64(d.Microseconds()) / 1000.0
+		if ms == float64(int64(ms)) {
+			return fmt.Sprintf("%dms", int64(ms))
+		}
+		return fmt.Sprintf("%.2fms", ms)
+	}
 	d = d.Round(time.Second)
 	if d < time.Minute {
 		return fmt.Sprintf("%ds", int(d/time.Second))
