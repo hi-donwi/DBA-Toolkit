@@ -29,9 +29,14 @@ jobs:
         run: go build -o /tmp/dbakit ./cmd/dbakit && /tmp/dbakit version
 
   integration:
-    name: integration tests against PostgreSQL
+    name: integration tests against PostgreSQL ${{ matrix.pg }}
     runs-on: ubuntu-latest
     needs: test
+    strategy:
+      matrix:
+        pg: ["16-alpine", "17-alpine"]
+    env:
+      POSTGRES_IMAGE: postgres:${{ matrix.pg }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
