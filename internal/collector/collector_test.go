@@ -381,6 +381,15 @@ const (
 		"COALESCE(pg_total_relation_size(c.oid), 0)::bigint " +
 		"FROM pg_class c " +
 		"JOIN pg_namespace n ON n.oid = c.relnamespace " +
+		"WHERE c.relkind IN ('r', 'm') " +
+		"AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast') " +
+		"AND n.nspname !~ '^pg_temp' " +
+		"ORDER BY 3 DESC, 2 ASC " +
+		"LIMIT $1"
+	xidTablesQueryWithToast = "SELECT COALESCE(n.nspname, ''), COALESCE(c.relname, ''), age(c.relfrozenxid)::bigint, " +
+		"COALESCE(pg_total_relation_size(c.oid), 0)::bigint " +
+		"FROM pg_class c " +
+		"JOIN pg_namespace n ON n.oid = c.relnamespace " +
 		"WHERE c.relkind IN ('r', 't', 'm') " +
 		"AND n.nspname NOT IN ('pg_catalog', 'information_schema') " +
 		"AND n.nspname !~ '^pg_temp' " +
@@ -505,6 +514,38 @@ func TestCollectorXID(t *testing.T) {
 	}
 	if got.OldestTables[0].Table != "events" || got.OldestTables[0].Age != 250000000 {
 		t.Errorf("OldestTables[0] mismatch: %+v", got.OldestTables[0])
+	}
+}
+
+func TestCollectorXIDWithToast(t *testing.T) {
+	q := &fakeQueryer{
+		queryRow: map[string]fakeRow{
+			freezeAgeQuery: {int64(200000000)},
+		},
+		query: map[string]fakeRows{
+			xidDbQuery: {
+				rows: []fakeRow{
+					{"app_prod", int64(250000000)},
+				},
+			},
+			xidTablesQueryWithToast: {
+				rows: []fakeRow{
+					{"pg_toast", "pg_toast_12345", int64(300000000), int64(2048)},
+					{"public", "events", int64(250000000), int64(1048576000)},
+				},
+			},
+		},
+	}
+	c := New(q)
+	got, err := c.XID(context.Background(), 10, true)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.OldestTables) != 2 {
+		t.Fatalf("expected 2 tables, got %d", len(got.OldestTables))
+	}
+	if got.OldestTables[0].Table != "pg_toast_12345" {
+		t.Errorf("expected first table to be pg_toast_12345, got %s", got.OldestTables[0].Table)
 	}
 }
 

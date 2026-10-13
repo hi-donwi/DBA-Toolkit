@@ -10,7 +10,10 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var flagTopTables int
+var (
+	flagTopTables    int
+	flagIncludeToast bool
+)
 
 var xidCmd = &cobra.Command{
 	Use:     "xid",
@@ -27,11 +30,12 @@ freeze threshold (WARNING: XID-002), and lagging tables (WARNING: XID-003). Read
 
 func init() {
 	xidCmd.Flags().IntVar(&flagTopTables, "top-tables", 10, "Number of oldest tables to inspect for freeze horizon")
+	xidCmd.Flags().BoolVar(&flagIncludeToast, "include-toast", false, "Include pg_toast tables in oldest tables inspection")
 	addThresholds(xidCmd, thresholdXIDWarnAge, thresholdXIDCritAge)
 }
 
 func xidRun(ctx context.Context, _ model.Connectivity, coll *collector.Collector, th evaluator.Thresholds) (any, []model.Finding, error) {
-	xidReport, err := coll.XID(ctx, flagTopTables)
+	xidReport, err := coll.XID(ctx, flagTopTables, flagIncludeToast)
 	if err != nil {
 		return nil, nil, err
 	}

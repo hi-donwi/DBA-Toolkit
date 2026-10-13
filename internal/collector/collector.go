@@ -292,7 +292,7 @@ func (c *Collector) Indexes(ctx context.Context) ([]model.IndexInfo, error) {
 }
 
 // XID collects transaction ID age and wraparound risk for databases and oldest tables.
-func (c *Collector) XID(ctx context.Context, topTablesLimit int) (model.XIDReport, error) {
+func (c *Collector) XID(ctx context.Context, topTablesLimit int, includeToast ...bool) (model.XIDReport, error) {
 	var rep model.XIDReport
 	rep.AutovacuumFreezeMaxAge = 200000000 // default fallback
 	_ = c.q.QueryRow(ctx, "SELECT setting::bigint FROM pg_settings WHERE name = 'autovacuum_freeze_max_age'", nil, &rep.AutovacuumFreezeMaxAge)
@@ -326,16 +326,28 @@ func (c *Collector) XID(ctx context.Context, topTablesLimit int) (model.XIDRepor
 		topTablesLimit = 10
 	}
 
-	tblRows, err := c.q.Query(ctx,
-		"SELECT COALESCE(n.nspname, ''), COALESCE(c.relname, ''), age(c.relfrozenxid)::bigint, "+
-			"COALESCE(pg_total_relation_size(c.oid), 0)::bigint "+
-			"FROM pg_class c "+
-			"JOIN pg_namespace n ON n.oid = c.relnamespace "+
-			"WHERE c.relkind IN ('r', 't', 'm') "+
-			"AND n.nspname NOT IN ('pg_catalog', 'information_schema') "+
-			"AND n.nspname !~ '^pg_temp' "+
-			"ORDER BY 3 DESC, 2 ASC "+
-			"LIMIT $1", topTablesLimit)
+	tblQuery := "SELECT COALESCE(n.nspname, ''), COALESCE(c.relname, ''), age(c.relfrozenxid)::bigint, " +
+		"COALESCE(pg_total_relation_size(c.oid), 0)::bigint " +
+		"FROM pg_class c " +
+		"JOIN pg_namespace n ON n.oid = c.relnamespace " +
+		"WHERE c.relkind IN ('r', 'm') " +
+		"AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast') " +
+		"AND n.nspname !~ '^pg_temp' " +
+		"ORDER BY 3 DESC, 2 ASC " +
+		"LIMIT $1"
+	if len(includeToast) > 0 && includeToast[0] {
+		tblQuery = "SELECT COALESCE(n.nspname, ''), COALESCE(c.relname, ''), age(c.relfrozenxid)::bigint, " +
+			"COALESCE(pg_total_relation_size(c.oid), 0)::bigint " +
+			"FROM pg_class c " +
+			"JOIN pg_namespace n ON n.oid = c.relnamespace " +
+			"WHERE c.relkind IN ('r', 't', 'm') " +
+			"AND n.nspname NOT IN ('pg_catalog', 'information_schema') " +
+			"AND n.nspname !~ '^pg_temp' " +
+			"ORDER BY 3 DESC, 2 ASC " +
+			"LIMIT $1"
+	}
+
+	tblRows, err := c.q.Query(ctx, tblQuery, topTablesLimit)
 	if err != nil {
 		return rep, err
 	}

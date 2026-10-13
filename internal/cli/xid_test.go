@@ -17,7 +17,7 @@ func TestXIDCmdStructure(t *testing.T) {
 			t.Errorf("missing alias %s", want)
 		}
 	}
-	for _, wantFlag := range []string{"warn-age", "crit-age", "top-tables"} {
+	for _, wantFlag := range []string{"warn-age", "crit-age", "top-tables", "include-toast"} {
 		if xidCmd.Flags().Lookup(wantFlag) == nil {
 			t.Errorf("missing flag %s", wantFlag)
 		}
