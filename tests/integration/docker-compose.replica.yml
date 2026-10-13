@@ -1,0 +1,45 @@
+services:
+  primary:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      POSTGRES_USER: dbakit
+      POSTGRES_PASSWORD: dbakit_pw
+      POSTGRES_DB: dbakit
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        printf '%s\n' 'echo "host replication dbakit all scram-sha-256" >> "$$PGDATA/pg_hba.conf"' > /docker-entrypoint-initdb.d/replication.sh
+        chmod 644 /docker-entrypoint-initdb.d/replication.sh
+        exec /usr/local/bin/docker-entrypoint.sh postgres -c wal_level=replica -c max_wal_senders=3
+    ports:
+      - "127.0.0.1:5434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbakit -d dbakit"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    tmpfs:
+      - /var/lib/postgresql/data
+  replica:
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    environment:
+      PGUSER: dbakit
+      PGPASSWORD: dbakit_pw
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        pg_basebackup -h primary -U dbakit -D /var/lib/postgresql/data -Fp -Xs -R
+        chown -R postgres:postgres /var/lib/postgresql/data
+        exec /usr/local/bin/docker-entrypoint.sh postgres
+    ports:
+      - "127.0.0.1:5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbakit -d dbakit"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    tmpfs:
+      - /var/lib/postgresql/data

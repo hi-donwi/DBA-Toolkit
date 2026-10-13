@@ -43,10 +43,10 @@ jobs:
         with:
           go-version: "1.26.x"
           cache: true
-      - name: start PostgreSQL
-        run: docker compose -f tests/integration/docker-compose.yml up -d --wait
       - name: run integration tests
-        run: go test -tags integration ./tests/integration/ -v
+        run: make integration
       - name: stop PostgreSQL
         if: always()
-        run: docker compose -f tests/integration/docker-compose.yml down
+        run: |
+          docker compose -p dbakit-integration -f tests/integration/docker-compose.yml down
+          docker compose -p dbakit-integration-replica -f tests/integration/docker-compose.replica.yml down

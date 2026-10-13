@@ -30,9 +30,11 @@ cover:
 
 # Integration tests need a running PostgreSQL; see tests/integration/README.md.
 integration:
-	docker compose -f tests/integration/docker-compose.yml up -d --wait
-	go test -tags integration ./tests/integration/ -v
-	docker compose -f tests/integration/docker-compose.yml down
+	@set -eu; \
+	trap 'docker compose -p dbakit-integration-replica -f tests/integration/docker-compose.replica.yml down; docker compose -p dbakit-integration -f tests/integration/docker-compose.yml down' EXIT; \
+	docker compose -p dbakit-integration -f tests/integration/docker-compose.yml up -d --wait; \
+	docker compose -p dbakit-integration-replica -f tests/integration/docker-compose.replica.yml up -d --wait; \
+	DBAKIT_RUN_REPLICA=1 go test -tags integration -count=1 ./tests/integration/ -v
 
 clean:
 	rm -f $(BINARY) coverage.out coverage.html

@@ -1,6 +1,6 @@
 # Integration tests
 
-These tests run the real `dbakit` binary against a live PostgreSQL instance
+These tests run the real `dbakit` binary against isolated PostgreSQL instances
 started with Docker Compose. They are opt-in because they need Docker and a
 server; the regular unit suite in `internal/` does not.
 
@@ -15,7 +15,12 @@ server; the regular unit suite in `internal/` does not.
 make integration
 ```
 
-or manually:
+`make integration` starts a standalone server and a primary/standby pair, then
+removes both Compose projects even if tests fail. Ports 5433, 5434, and 5435 must
+be free. Bindings are loopback-only and database storage is disposable tmpfs.
+Use a local Docker context explicitly; do not run this against a remote daemon.
+
+For only the standalone checks:
 
 ```sh
 docker compose -f tests/integration/docker-compose.yml up -d --wait
@@ -31,12 +36,16 @@ file).
 ## What it covers
 
 - Real connectivity against PostgreSQL 16 (version, engine, current database).
-- Every read-only command (`health`, `diagnose`, `sessions`, `locks`,
-  `replication`, `databases`, `config`) emits parseable JSON, includes the
+- The read-only commands `health`, `diagnose`, `sessions`, `locks`,
+  `replication`, `databases`, `config`, `indexes`, `xid`, `cache`, `bloat`, `wal`,
+  and `top --once` emit parseable JSON, include the
   `CONN-001` connectivity finding, and does not leak the test password.
 - A deliberately unreachable endpoint (`--db-port 1`) still exits 0 with a
   single CRITICAL connectivity finding and parseable JSON.
 - The binary is built once per suite run with `-tags integration`.
+- A streaming, caught-up standby reports known lag even when the primary is idle.
+- Subprocesses discard inherited `DBAKIT_DB_*` and libpq settings, including URLs.
 
-Nothing here writes to the database beyond the container defaults; dbakit
-itself stays read-only.
+Fixture bootstrap creates a replication connection and copies the synthetic
+database with `pg_basebackup`. The dbakit binary itself stays read-only. These
+fixtures do not prove production failover, quorum, backup restoration, or capacity.

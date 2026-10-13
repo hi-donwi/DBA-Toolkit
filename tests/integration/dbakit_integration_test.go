@@ -12,7 +12,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 var env = []string{
@@ -24,23 +26,28 @@ var env = []string{
 	"DBAKIT_DB_SSLMODE=disable",
 }
 
-const binary = "/tmp/dbakit-integration"
+var binary string
 
 // TestMain builds the real binary once for the whole suite.
 func TestMain(m *testing.M) {
-	if _, err := exec.LookPath("docker"); err != nil {
-		fmt.Println("SKIP: docker not available")
-		os.Exit(0)
+	dir, err := os.MkdirTemp("", "dbakit-integration-")
+	if err != nil {
+		fmt.Printf("cannot create integration build directory: %v\n", err)
+		os.Exit(1)
 	}
+	binary = filepath.Join(dir, "dbakit")
 	root := repoRoot()
 	cmd := exec.Command("go", "build", "-tags", "integration", "-o", binary, "./cmd/dbakit")
 	cmd.Dir = root
 	cmd.Env = os.Environ()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		fmt.Printf("build failed (repo root: %s): %v\n%s\n", root, err, out)
+		_ = os.RemoveAll(dir)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	code := m.Run()
+	_ = os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // repoRoot walks up from the working directory to find the directory containing
@@ -63,10 +70,28 @@ func repoRoot() string {
 	}
 }
 
+func isolatedEnv(extra ...string) []string {
+	base := make([]string, 0, len(os.Environ())+len(env)+len(extra)+1)
+	for _, item := range os.Environ() {
+		if strings.HasPrefix(item, "DBAKIT_DB_") || strings.HasPrefix(item, "PG") {
+			continue
+		}
+		base = append(base, item)
+	}
+	base = append(base, "DBAKIT_DB_URL=")
+	base = append(base, env...)
+	return append(base, extra...)
+}
+
 func run(t *testing.T, args ...string) (map[string]any, string) {
 	t.Helper()
+	return runWithEnv(t, nil, args...)
+}
+
+func runWithEnv(t *testing.T, extra []string, args ...string) (map[string]any, string) {
+	t.Helper()
 	cmd := exec.Command(binary, append(args, "--json", "--timeout", "30s")...)
-	cmd.Env = append(os.Environ(), env...)
+	cmd.Env = isolatedEnv(extra...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -100,7 +125,7 @@ func TestConnectivity(t *testing.T) {
 }
 
 func TestAllReadOnlyCommandsAgainstServer(t *testing.T) {
-	for _, cmd := range []string{"diagnose", "sessions", "locks", "replication", "databases", "config"} {
+	for _, cmd := range []string{"diagnose", "sessions", "locks", "replication", "databases", "config", "indexes", "xid", "cache", "top-queries", "bloat", "wal"} {
 		rep, raw := run(t, cmd)
 		if rep["command"] != cmd {
 			t.Fatalf("%s: command=%v", cmd, rep["command"])
@@ -116,12 +141,55 @@ func TestAllReadOnlyCommandsAgainstServer(t *testing.T) {
 	}
 }
 
+func TestTopOnceAgainstServer(t *testing.T) {
+	rep, raw := run(t, "top", "--once")
+	if rep["command"] != "top" {
+		t.Fatalf("command = %v\n%s", rep["command"], raw)
+	}
+	if bytes.Contains([]byte(raw), []byte("dbakit_pw")) {
+		t.Fatal("top output leaked the password")
+	}
+}
+
+func TestURLReportsActualDatabase(t *testing.T) {
+	rep, raw := runWithEnv(t, []string{"DBAKIT_DB_NAME=postgres", "DBAKIT_DB_URL=postgres://dbakit:dbakit_pw@127.0.0.1:5433/dbakit?sslmode=disable"}, "health")
+	if rep["database"].(map[string]any)["name"] != "dbakit" {
+		t.Fatalf("report identity must match the actual database: %s", raw)
+	}
+}
+
+func TestReplicaFixtureDoesNotFalseAlarm(t *testing.T) {
+	if os.Getenv("DBAKIT_RUN_REPLICA") != "1" {
+		t.Skip("set DBAKIT_RUN_REPLICA=1 with the replica compose fixture")
+	}
+	primary, primaryRaw := runWithEnv(t, []string{"DBAKIT_DB_PORT=5434"}, "replication")
+	if roleOf(primary) != "primary" {
+		t.Fatalf("primary role mismatch: %s", primaryRaw)
+	}
+	data := primary["data"].(map[string]any)["replication"].(map[string]any)
+	if data["connected_standbys"] != float64(1) {
+		t.Fatalf("primary must see a connected standby: %s", primaryRaw)
+	}
+	time.Sleep(2500 * time.Millisecond)
+	standby, standbyRaw := runWithEnv(t, []string{"DBAKIT_DB_PORT=5435"}, "replication", "--lag-threshold", "1s", "--lag-critical", "2s")
+	if roleOf(standby) != "standby" {
+		t.Fatalf("standby role mismatch: %s", standbyRaw)
+	}
+	if containsSeverity(standby, "CRITICAL") {
+		t.Fatalf("caught-up standby must not be a false critical: %s", standbyRaw)
+	}
+	local := standby["data"].(map[string]any)["replication"].(map[string]any)
+	if local["local_replay_lag_known"] != true {
+		t.Fatalf("streaming, caught-up standby must have known lag: %s", standbyRaw)
+	}
+}
+
 func TestEveryCommandConnectionFailureIsACriticalFinding(t *testing.T) {
 	base := []string{"health", "--json", "--timeout", "5s",
 		"--db-host", "127.0.0.1", "--db-port", "1"}
 	cmd := exec.Command(binary, base...)
 	cmd.Dir = repoRoot()
-	cmd.Env = append(os.Environ(), "DBAKIT_DB_PASSWORD=")
+	cmd.Env = isolatedEnv("DBAKIT_DB_PASSWORD=")
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = &out
@@ -136,6 +204,38 @@ func TestEveryCommandConnectionFailureIsACriticalFinding(t *testing.T) {
 	if summary["critical"] != float64(1) {
 		t.Fatalf("expected 1 CRITICAL on connect failure: %s", out.String())
 	}
+}
+
+func findings(rep map[string]any) []map[string]any {
+	fs, _ := rep["findings"].([]any)
+	out := make([]map[string]any, 0, len(fs))
+	for _, finding := range fs {
+		if item, ok := finding.(map[string]any); ok {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func containsSeverity(rep map[string]any, severity string) bool {
+	for _, finding := range findings(rep) {
+		if finding["severity"] == severity {
+			return true
+		}
+	}
+	return false
+}
+
+func roleOf(rep map[string]any) string {
+	for _, finding := range findings(rep) {
+		if finding["id"] != "REPL-001" {
+			continue
+		}
+		meta, _ := finding["metadata"].(map[string]any)
+		role, _ := meta["role"].(string)
+		return role
+	}
+	return ""
 }
 
 func findingIDs(rep map[string]any) []string {
