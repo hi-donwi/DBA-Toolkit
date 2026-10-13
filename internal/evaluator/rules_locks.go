@@ -13,18 +13,23 @@ import (
 // tables. Detection only — the tool never terminates sessions.
 func EvaluateLocks(pairs []model.BlockingPair, threshold time.Duration) []model.Finding {
 	flag := make([]model.BlockingPair, 0, len(pairs))
+	out := make([]model.Finding, 0, len(pairs))
 	for _, p := range pairs {
+		if p.WaitUnknown {
+			out = append(out, finding("LOCK-001", model.SeverityWarning, "Lock wait duration unknown",
+				fmt.Sprintf("PID %d is blocked by PID %d, but the wait start is unavailable", p.BlockedPID, p.BlockingPID)))
+			continue
+		}
 		if time.Duration(p.WaitSeconds*float64(time.Second)) >= threshold {
 			flag = append(flag, p)
 		}
 	}
-	if len(flag) == 0 {
+	if len(flag) == 0 && len(out) == 0 {
 		return []model.Finding{
 			finding("LOCK-001", model.SeverityPass, "Locks and blocking",
 				fmt.Sprintf("No blocking detected within %s", threshold)),
 		}
 	}
-	out := make([]model.Finding, 0, len(flag))
 	for _, p := range flag {
 		ev := fmt.Sprintf("Blocked PID: %d\nBlocking PID: %d\nDatabase: %s\nWait: %s\nBlocked state: %s\nBlocking state: %s",
 			p.BlockedPID, p.BlockingPID, p.Database, fmtDur(p.WaitSeconds), p.BlockedState, p.BlockingState)

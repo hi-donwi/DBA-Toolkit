@@ -72,8 +72,8 @@ individual settings.
 | `diagnose` | | `health` plus long queries, locks, and replication |
 | `sessions` | `activity` | Active sessions with query text, state, and wait events |
 | `locks` | | Blocked sessions and their blocking sessions |
-| `replication` | `repl` | Role (primary/standby) and replay lag per connected replica |
-| `databases` | `dbs` | Per-database size, owner, and connection count |
+| `replication` | `repl` | Role (primary/standby) and replay lag per connected replica. Missing lag is a warning, not zero lag. |
+| `databases` | `dbs` | Per-database size, owner, and backend connection count |
 | `indexes` | `idx`, `index` | User indexes with size, scan count, and validity |
 | `xid` | `wraparound`, `freeze`, `vacuum` | Transaction ID (XID) age, wraparound headroom, and oldest tables |
 | `cache` | `buffer`, `hit-ratio`, `buffercache` | Buffer cache hit ratios across database, tables, and indexes |

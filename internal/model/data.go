@@ -48,6 +48,7 @@ type BlockingPair struct {
 	BlockingUser  string  `json:"blocking_user"`
 	Database      string  `json:"database"`
 	WaitSeconds   float64 `json:"wait_seconds"`
+	WaitUnknown   bool    `json:"wait_unknown,omitempty"`
 	BlockedState  string  `json:"blocked_state"`
 	BlockingState string  `json:"blocking_state"`
 	BlockedQuery  string  `json:"blocked_query,omitempty"`
@@ -60,6 +61,7 @@ type Replica struct {
 	ClientAddr       string  `json:"client_addr,omitempty"`
 	State            string  `json:"state"`
 	SyncState        string  `json:"sync_state,omitempty"`
+	ReplayLagKnown   bool    `json:"replay_lag_known"`
 	ReplayLagSeconds float64 `json:"replay_lag_seconds"`
 }
 
@@ -69,8 +71,11 @@ type Replication struct {
 	IsInRecovery      bool      `json:"is_in_recovery"`
 	ConnectedStandbys int       `json:"connected_standbys"`
 	Replicas          []Replica `json:"replicas,omitempty"`
-	// LocalReplayLagSeconds is only meaningful on a standby and measures how far
-	// behind this server is from receiving WAL.
+	// LocalReplayLagKnown is false when PostgreSQL has no replay timestamp.
+	// A missing timestamp is unknown lag, not zero lag.
+	LocalReplayLagKnown bool `json:"local_replay_lag_known"`
+	// Streaming, unpaused standbys with equal receive/replay LSNs have zero lag.
+	// Otherwise this is an estimate from the last replayed transaction timestamp.
 	LocalReplayLagSeconds float64 `json:"local_replay_lag_seconds,omitempty"`
 }
 
@@ -242,4 +247,3 @@ type WALReport struct {
 	WAL        WALStats        `json:"wal"`
 	Checkpoint CheckpointStats `json:"checkpoint"`
 }
-

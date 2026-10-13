@@ -31,7 +31,7 @@ func init() {
 }
 
 func topQueriesRun(ctx context.Context, _ model.Connectivity, coll *collector.Collector, th evaluator.Thresholds) (any, []model.Finding, error) {
-	topQueriesReport, err := coll.TopQueries(ctx, flagTopQueriesLimit)
+	topQueriesReport, err := coll.TopQueries(ctx, flagTopQueriesLimit, flagMaxQueryLen)
 	if err != nil {
 		return nil, nil, err
 	}

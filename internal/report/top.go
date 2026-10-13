@@ -48,7 +48,11 @@ func FormatTopSnapshot(snap model.TopSnapshot, conn model.Connectivity, findings
 	// Replication details if applicable
 	if snap.Replication.ConnectedStandbys > 0 || snap.Replication.Role == "standby" {
 		if snap.Replication.Role == "standby" {
-			fmt.Fprintf(&buf, "Standby Replay Lag: %s\n", fmtDur(snap.Replication.LocalReplayLagSeconds))
+			lag := "unknown"
+			if snap.Replication.LocalReplayLagKnown {
+				lag = fmtDur(snap.Replication.LocalReplayLagSeconds)
+			}
+			fmt.Fprintf(&buf, "Standby Replay Lag: %s\n", lag)
 		} else {
 			fmt.Fprintf(&buf, "Connected Standbys: %d\n", snap.Replication.ConnectedStandbys)
 		}
@@ -60,8 +64,12 @@ func FormatTopSnapshot(snap model.TopSnapshot, conn model.Connectivity, findings
 		tw := tabwriter.NewWriter(&buf, 0, 4, 2, ' ', 0)
 		fmt.Fprintln(tw, "BLOCKED PID\tBLOCKING PID\tDATABASE\tWAIT\tBLOCKED QUERY")
 		for _, l := range snap.Locks {
+			wait := fmtDur(l.WaitSeconds)
+			if l.WaitUnknown {
+				wait = "unknown"
+			}
 			fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\n",
-				l.BlockedPID, l.BlockingPID, l.Database, fmtDur(l.WaitSeconds), oneLine(l.BlockedQuery))
+				l.BlockedPID, l.BlockingPID, l.Database, wait, oneLine(l.BlockedQuery))
 		}
 		tw.Flush()
 	}

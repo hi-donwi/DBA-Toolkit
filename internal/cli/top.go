@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/signal"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/hi-donwi/DBA-Toolkit/internal/collector"
@@ -53,9 +51,6 @@ func topRun(ctx context.Context, conn model.Connectivity, coll *collector.Collec
 	}
 
 	sortSessions(snap.Sessions, flagTopSort)
-	if flagTopLimit > 0 && len(snap.Sessions) > flagTopLimit {
-		snap.Sessions = snap.Sessions[:flagTopLimit]
-	}
 
 	var findings []model.Finding
 	findings = append(findings, evaluator.EvaluateUsage(snap.Health.TotalConnections, snap.Health.ActiveConnections, snap.Health.MaxConnections, th)...)
@@ -63,6 +58,9 @@ func topRun(ctx context.Context, conn model.Connectivity, coll *collector.Collec
 	findings = append(findings, evaluator.EvaluateLocks(snap.Locks, th.LockWait)...)
 	findings = append(findings, evaluator.EvaluateReplication(snap.Replication, th)...)
 	evaluator.Sort(findings)
+	if flagTopLimit > 0 && len(snap.Sessions) > flagTopLimit {
+		snap.Sessions = snap.Sessions[:flagTopLimit]
+	}
 
 	return report.TopData{
 		Connectivity: conn,
@@ -106,6 +104,9 @@ func isCharDevice(f *os.File) bool {
 }
 
 func runTop(cmd *cobra.Command, args []string) error {
+	if flagTopRefresh <= 0 {
+		return fmt.Errorf("top: --refresh must be greater than 0")
+	}
 	// If one-shot mode or count == 1, execute standard runReport
 	if flagTopOnce || flagTopCount == 1 {
 		return runReport(cmd, "top", topRun)
@@ -115,8 +116,7 @@ func runTop(cmd *cobra.Command, args []string) error {
 	th := resolveThresholds(cmd)
 	opts := report.Options{NoColor: flagNoColor, HidePass: flagHidePass}
 
-	// Context for graceful cancellation via SIGINT or SIGTERM
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, cancel := commandContext()
 	defer cancel()
 
 	conn, db, err := connectProbe(ctx, cfg)
@@ -154,7 +154,7 @@ func runTop(cmd *cobra.Command, args []string) error {
 			Version:   Version,
 			Command:   "top",
 			Timestamp: start,
-			Database:  model.Database{Engine: "postgresql", Name: cfg.Name, Version: conn.Version},
+			Database:  model.Database{Engine: "postgresql", Name: conn.Database, Version: conn.Version},
 		}
 
 		data, findings, runErr := topRun(ctx, conn, coll, th)
@@ -189,6 +189,9 @@ func runTop(cmd *cobra.Command, args []string) error {
 
 		select {
 		case <-ctx.Done():
+			if ctx.Err() == context.DeadlineExceeded {
+				return ctx.Err()
+			}
 			return nil
 		case <-ticker.C:
 			// Recalculate latency on each tick if possible

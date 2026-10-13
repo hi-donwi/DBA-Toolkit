@@ -67,13 +67,20 @@ func TestEvaluateLongQueriesNone(t *testing.T) {
 	}
 }
 
+func TestLongQueriesIgnoreOldIdleSessions(t *testing.T) {
+	fs := EvaluateLongQueries([]model.Session{{State: "idle", DurationSeconds: 3600}}, time.Minute)
+	if len(fs) != 1 || fs[0].Severity != model.SeverityPass {
+		t.Fatalf("idle sessions are not running queries: %+v", fs)
+	}
+}
+
 func TestEvaluateLongQueriesDetects(t *testing.T) {
 	fs := EvaluateLongQueries([]model.Session{
 		{PID: 12345, User: "app_user", Database: "app", State: "active", DurationSeconds: 182},
 		{PID: 42, User: "other", Database: "app", State: "idle in transaction", DurationSeconds: 3},
 	}, time.Minute)
-	if len(fs) != 2 {
-		t.Fatalf("want a finding per session, got %+v", fs)
+	if len(fs) != 1 {
+		t.Fatalf("want only the session at or above threshold, got %+v", fs)
 	}
 	if fs[0].Severity != model.SeverityWarning || fs[0].ID != "LONGQ-001" {
 		t.Fatalf("want WARNING LONGQ-001: %+v", fs[0])
@@ -121,14 +128,21 @@ func TestEvaluateLocksNone(t *testing.T) {
 	}
 }
 
+func TestUnknownLockWaitNeverPasses(t *testing.T) {
+	fs := EvaluateLocks([]model.BlockingPair{{BlockedPID: 1, BlockingPID: 2, WaitUnknown: true}}, time.Minute)
+	if len(fs) != 1 || fs[0].Severity != model.SeverityWarning {
+		t.Fatalf("unknown lock wait must be explicit: %+v", fs)
+	}
+}
+
 func TestEvaluateReplicationPrimaryLag(t *testing.T) {
 	th := DefaultThresholds() // warn 30s, crit 120s
 	r := model.Replication{
 		Role: "primary", IsInRecovery: false, ConnectedStandbys: 2,
 		Replicas: []model.Replica{
-			{ApplicationName: "db-replica-01", State: "streaming", ReplayLagSeconds: 10},  // PASS
-			{ApplicationName: "db-replica-02", State: "streaming", ReplayLagSeconds: 92},  // WARNING
-			{ApplicationName: "db-replica-03", State: "streaming", ReplayLagSeconds: 300}, // CRITICAL
+			{ApplicationName: "db-replica-01", State: "streaming", ReplayLagKnown: true, ReplayLagSeconds: 10},  // PASS
+			{ApplicationName: "db-replica-02", State: "streaming", ReplayLagKnown: true, ReplayLagSeconds: 92},  // WARNING
+			{ApplicationName: "db-replica-03", State: "streaming", ReplayLagKnown: true, ReplayLagSeconds: 300}, // CRITICAL
 		},
 	}
 	fs := EvaluateReplication(r, th)
@@ -176,7 +190,7 @@ func TestEvaluateReplicationRoleInfoAlwaysPresent(t *testing.T) {
 }
 
 func TestEvaluateReplicationStandby(t *testing.T) {
-	r := model.Replication{Role: "standby", IsInRecovery: true, LocalReplayLagSeconds: 5}
+	r := model.Replication{Role: "standby", IsInRecovery: true, LocalReplayLagKnown: true, LocalReplayLagSeconds: 5}
 	fs := EvaluateReplication(r, DefaultThresholds())
 	var got []model.Severity
 	for _, f := range fs {
@@ -195,6 +209,25 @@ func TestEvaluateReplicationStandby(t *testing.T) {
 		}
 	}
 	t.Fatalf("high local lag should be CRITICAL: %+v", fs)
+}
+
+func TestEvaluateReplicationUnknownLagIsNotHealthy(t *testing.T) {
+	r := model.Replication{
+		Role: "primary",
+		Replicas: []model.Replica{{
+			ApplicationName: "catchup", State: "catchup", ReplayLagKnown: false,
+		}},
+	}
+	fs := EvaluateReplication(r, DefaultThresholds())
+	for _, f := range fs {
+		if f.ID == "REPL-002" && f.Severity == model.SeverityPass {
+			t.Fatalf("unknown lag must not PASS: %+v", f)
+		}
+		if f.ID == "REPL-002" && f.Severity == model.SeverityWarning {
+			return
+		}
+	}
+	t.Fatalf("expected WARNING for unknown lag: %+v", fs)
 }
 
 func TestEvaluateDatabases(t *testing.T) {
@@ -710,4 +743,3 @@ func TestEvaluateWAL(t *testing.T) {
 		}
 	}
 }
-

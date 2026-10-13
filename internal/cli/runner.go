@@ -69,6 +69,7 @@ func runReport(cmd *cobra.Command, command string, run runFunc) error {
 		rep.Findings = evaluator.EvaluateConnectivity(conn)
 	} else {
 		rep.Database.Version = conn.Version
+		rep.Database.Name = conn.Database
 		defer db.Close()
 		data, findings, runErr := run(ctx, conn, collector.New(db), th)
 		if runErr != nil {

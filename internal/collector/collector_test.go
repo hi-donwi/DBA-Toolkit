@@ -14,9 +14,10 @@ type fakeRow []any
 
 // fakeRows serves canned rows and simulates Scan like a driver row iterator.
 type fakeRows struct {
-	rows  []fakeRow
-	index int
-	err   error
+	rows    []fakeRow
+	index   int
+	err     error
+	scanErr error
 }
 
 func (f *fakeRows) Next() bool {
@@ -28,6 +29,9 @@ func (f *fakeRows) Next() bool {
 }
 
 func (f *fakeRows) Scan(dest ...any) error {
+	if f.scanErr != nil {
+		return f.scanErr
+	}
 	if f.err != nil {
 		return f.err
 	}
@@ -207,7 +211,7 @@ func TestLongQueriesPassesThresholdArg(t *testing.T) {
 func TestLocksParse(t *testing.T) {
 	q := &fakeQueryer{query: map[string]fakeRows{
 		locksQuery: {rows: []fakeRow{{111, "buser", 222, "guser", "app", 45.0, "active", "idle in transaction",
-			"select * from x", "update y set z=1"}}},
+			"select * from x", "update y set z=1", false}}},
 	}}
 	c := New(q)
 	pairs, err := c.Locks(ctx(), 200)
@@ -230,7 +234,7 @@ func TestReplicationPrimary(t *testing.T) {
 	q := &fakeQueryer{
 		queryRow: map[string]fakeRow{roleQuery: {false}},
 		query: map[string]fakeRows{
-			replicasQuery: {rows: []fakeRow{{"db-replica-01", "10.0.0.5", "streaming", "async", 92.0}}},
+			replicasQuery: {rows: []fakeRow{{"db-replica-01", "10.0.0.5", "streaming", "async", true, 92.0}}},
 		},
 	}
 	c := New(q)
@@ -241,7 +245,7 @@ func TestReplicationPrimary(t *testing.T) {
 	if r.Role != "primary" || r.ConnectedStandbys != 1 {
 		t.Fatalf("primary parse wrong: %+v", r)
 	}
-	if r.Replicas[0].ApplicationName != "db-replica-01" || r.Replicas[0].ReplayLagSeconds != 92 {
+	if r.Replicas[0].ApplicationName != "db-replica-01" || !r.Replicas[0].ReplayLagKnown || r.Replicas[0].ReplayLagSeconds != 92 {
 		t.Fatalf("replica parse wrong: %+v", r.Replicas[0])
 	}
 }
@@ -249,14 +253,14 @@ func TestReplicationPrimary(t *testing.T) {
 func TestReplicationStandby(t *testing.T) {
 	q := &fakeQueryer{queryRow: map[string]fakeRow{
 		roleQuery:       {true},
-		standbyLagQuery: {30.0},
+		standbyLagQuery: {true, 30.0},
 	}}
 	c := New(q)
 	r, err := c.Replication(ctx())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Role != "standby" || !r.IsInRecovery || r.LocalReplayLagSeconds != 30 {
+	if r.Role != "standby" || !r.IsInRecovery || !r.LocalReplayLagKnown || r.LocalReplayLagSeconds != 30 {
 		t.Fatalf("standby parse wrong: %+v", r)
 	}
 }
@@ -332,7 +336,7 @@ const (
 		"current_database(), EXTRACT(EPOCH FROM (now() - pg_postmaster_start_time())), " +
 		"current_setting('max_connections')::int, pg_database_size(current_database())"
 	usageQuery = "SELECT count(*) FILTER (WHERE state = 'active'), count(*) " +
-		"FROM pg_stat_activity WHERE pid <> pg_backend_pid()"
+		"FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'"
 	sessionsQuery = "SELECT pid, COALESCE(usename, ''), COALESCE(datname, ''), COALESCE(state, ''), " +
 		"COALESCE(EXTRACT(EPOCH FROM (now() - query_start)), 0), " +
 		"COALESCE(wait_event_type, ''), COALESCE(wait_event, ''), COALESCE(query, '') " +
@@ -346,20 +350,27 @@ const (
 		"AND COALESCE(EXTRACT(EPOCH FROM (now() - query_start)), 0) >= $1 " +
 		"ORDER BY 5 DESC, 1 ASC"
 	locksQuery = "SELECT b.pid, COALESCE(b.usename, ''), c.pid, COALESCE(c.usename, ''), COALESCE(b.datname, ''), " +
-		"COALESCE(EXTRACT(EPOCH FROM (now() - b.query_start)), 0), " +
+		"COALESCE(EXTRACT(EPOCH FROM (now() - w.waitstart)), 0), " +
 		"COALESCE(b.state, ''), COALESCE(c.state, ''), " +
-		"COALESCE(b.query, ''), COALESCE(c.query, '') " +
+		"COALESCE(b.query, ''), COALESCE(c.query, ''), w.waitstart IS NULL " +
 		"FROM pg_stat_activity b JOIN pg_stat_activity c ON c.pid = ANY(pg_blocking_pids(b.pid)) " +
+		"LEFT JOIN LATERAL (SELECT MIN((to_jsonb(l)->>'waitstart')::timestamptz) AS waitstart " +
+		"FROM pg_locks l WHERE l.pid = b.pid AND NOT l.granted) w ON true " +
 		"WHERE b.pid <> pg_backend_pid() " +
 		"ORDER BY 6 DESC, 1 ASC"
 	roleQuery       = "SELECT pg_is_in_recovery()"
-	standbyLagQuery = "SELECT COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())), 0)"
-	replicasQuery   = "SELECT COALESCE(application_name, ''), COALESCE(client_addr::text, ''), " +
-		"COALESCE(state, ''), COALESCE(sync_state, ''), " +
+	standbyLagQuery = "SELECT streaming AND NOT paused AND received IS NOT NULL AND replayed IS NOT NULL " +
+		"AND (received = replayed OR replayed_at IS NOT NULL), " +
+		"CASE WHEN received = replayed THEN 0 ELSE COALESCE(EXTRACT(EPOCH FROM (now() - replayed_at)), 0) END " +
+		"FROM (SELECT pg_last_wal_receive_lsn() AS received, pg_last_wal_replay_lsn() AS replayed, " +
+		"pg_last_xact_replay_timestamp() AS replayed_at, pg_is_wal_replay_paused() AS paused, " +
+		"EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming') AS streaming) s"
+	replicasQuery = "SELECT COALESCE(application_name, ''), COALESCE(client_addr::text, ''), " +
+		"COALESCE(state, ''), COALESCE(sync_state, ''), replay_lag IS NOT NULL, " +
 		"COALESCE(EXTRACT(EPOCH FROM replay_lag), 0) " +
 		"FROM pg_stat_replication ORDER BY 1 ASC"
-	databasesQuery = "SELECT d.datname, pg_get_userbyid(d.datdba), COUNT(s.datid) " +
-		"FROM pg_database d LEFT JOIN pg_stat_database s ON s.datid = d.oid " +
+	databasesQuery = "SELECT d.datname, pg_get_userbyid(d.datdba), COUNT(a.pid) " +
+		"FROM pg_database d LEFT JOIN pg_stat_activity a ON a.datid = d.oid AND a.pid <> pg_backend_pid() " +
 		"WHERE NOT d.datistemplate GROUP BY d.datname, d.datdba ORDER BY d.datname"
 	sizeQuery     = "SELECT COALESCE(pg_database_size($1), 0)"
 	settingsQuery = "SELECT name, setting, COALESCE(unit, ''), COALESCE(source, ''), COALESCE(context, '') " +
@@ -623,7 +634,7 @@ func TestCollectorTopQueries(t *testing.T) {
 		},
 	}
 	c := New(q)
-	got, err := c.TopQueries(context.Background(), 10)
+	got, err := c.TopQueries(context.Background(), 10, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -642,6 +653,11 @@ func TestCollectorTopQueries(t *testing.T) {
 	if got.Queries[1].TempBlksWritten != 800 {
 		t.Errorf("query[1] TempBlksWritten got %d, want 800", got.Queries[1].TempBlksWritten)
 	}
+	for _, query := range got.Queries {
+		if query.Query != "" {
+			t.Fatalf("zero query length must omit SQL text: %+v", query)
+		}
+	}
 }
 
 func TestCollectorTopQueries_NoExtension(t *testing.T) {
@@ -651,7 +667,7 @@ func TestCollectorTopQueries_NoExtension(t *testing.T) {
 		},
 	}
 	c := New(q)
-	got, err := c.TopQueries(context.Background(), 10)
+	got, err := c.TopQueries(context.Background(), 10, 200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -679,7 +695,7 @@ func TestCollectorTopQueries_Legacy(t *testing.T) {
 		},
 	}
 	c := New(q)
-	got, err := c.TopQueries(context.Background(), 5)
+	got, err := c.TopQueries(context.Background(), 5, 200)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -733,10 +749,10 @@ func TestCollectorTopSnapshot(t *testing.T) {
 				{101, "dba", "app", "active", 12.5, "Client", "ClientRead", "SELECT 1"},
 			}},
 			locksQuery: {rows: []fakeRow{
-				{101, "dba", 102, "writer", "app", 5.0, "active", "active", "UPDATE a", "UPDATE a"},
+				{101, "dba", 102, "writer", "app", 5.0, "active", "active", "UPDATE a", "UPDATE a", false},
 			}},
 			replicasQuery: {rows: []fakeRow{
-				{"replica1", "10.0.0.2", "streaming", "async", 0.05},
+				{"replica1", "10.0.0.2", "streaming", "async", true, 0.05},
 			}},
 		},
 	}
@@ -835,3 +851,17 @@ func TestCollectorWALPre17(t *testing.T) {
 	}
 }
 
+func TestWALRejectsSettingsScanFailure(t *testing.T) {
+	q := &fakeQueryer{
+		query: map[string]fakeRows{walSettingsQuery: {
+			rows: []fakeRow{{"fsync", "on"}}, scanErr: fmt.Errorf("scan failed"),
+		}},
+		queryRow: map[string]fakeRow{
+			walStatsQuery:         {int64(0), int64(0), int64(0), int64(0), int64(0), int64(0), 0.0, 0.0, ""},
+			checkpointerQueryPG17: {int64(0), int64(0), 0.0, 0.0, int64(0), ""},
+		},
+	}
+	if _, err := New(q).WAL(ctx(), 170000); err == nil {
+		t.Fatal("settings scan failure must not produce a successful WAL report")
+	}
+}

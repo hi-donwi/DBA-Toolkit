@@ -111,8 +111,12 @@ func renderLocks(w io.Writer, pairs []model.BlockingPair, c colors) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "BLOCKED PID\tBLOCKING PID\tDATABASE\tWAIT\tBLOCKED STATE\tBLOCKING STATE")
 	for _, p := range pairs {
+		wait := fmtDur(p.WaitSeconds)
+		if p.WaitUnknown {
+			wait = "unknown"
+		}
 		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\n",
-			p.BlockedPID, p.BlockingPID, p.Database, fmtDur(p.WaitSeconds), p.BlockedState, p.BlockingState)
+			p.BlockedPID, p.BlockingPID, p.Database, wait, p.BlockedState, p.BlockingState)
 	}
 	tw.Flush()
 }
@@ -121,7 +125,11 @@ func renderReplication(w io.Writer, r model.Replication, c colors) {
 	fmt.Fprintf(w, "%-14s %s\n", "Role", c.Bold(r.Role))
 	fmt.Fprintf(w, "%-14s %d\n", "Standbys", r.ConnectedStandbys)
 	if r.Role == "standby" {
-		fmt.Fprintf(w, "%-14s %s\n", "Replay lag", fmtDur(r.LocalReplayLagSeconds))
+		lag := "unknown"
+		if r.LocalReplayLagKnown {
+			lag = fmtDur(r.LocalReplayLagSeconds)
+		}
+		fmt.Fprintf(w, "%-14s %s\n", "Replay lag", lag)
 		fmt.Fprintln(w)
 		return
 	}
@@ -133,8 +141,12 @@ func renderReplication(w io.Writer, r model.Replication, c colors) {
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "APPLICATION\tSTATE\tSYNC\tREPLAY LAG")
 	for _, rep := range r.Replicas {
+		lag := "unknown"
+		if rep.ReplayLagKnown {
+			lag = fmtDur(rep.ReplayLagSeconds)
+		}
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			rep.ApplicationName, rep.State, rep.SyncState, fmtDur(rep.ReplayLagSeconds))
+			rep.ApplicationName, rep.State, rep.SyncState, lag)
 	}
 	tw.Flush()
 }

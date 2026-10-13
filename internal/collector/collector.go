@@ -74,7 +74,7 @@ func (c *Collector) Health(ctx context.Context) (model.Health, error) {
 func (c *Collector) Usage(ctx context.Context) (total, active int, err error) {
 	rows, err := c.q.Query(ctx,
 		"SELECT count(*) FILTER (WHERE state = 'active'), count(*) "+
-			"FROM pg_stat_activity WHERE pid <> pg_backend_pid()")
+			"FROM pg_stat_activity WHERE pid <> pg_backend_pid() AND backend_type = 'client backend'")
 	if err != nil {
 		return 0, 0, err
 	}
@@ -146,10 +146,12 @@ func (c *Collector) LongQueries(ctx context.Context, threshold time.Duration, ma
 func (c *Collector) Locks(ctx context.Context, maxQueryLen int) ([]model.BlockingPair, error) {
 	rows, err := c.q.Query(ctx,
 		"SELECT b.pid, COALESCE(b.usename, ''), c.pid, COALESCE(c.usename, ''), COALESCE(b.datname, ''), "+
-			"COALESCE(EXTRACT(EPOCH FROM (now() - b.query_start)), 0), "+
+			"COALESCE(EXTRACT(EPOCH FROM (now() - w.waitstart)), 0), "+
 			"COALESCE(b.state, ''), COALESCE(c.state, ''), "+
-			"COALESCE(b.query, ''), COALESCE(c.query, '') "+
+			"COALESCE(b.query, ''), COALESCE(c.query, ''), w.waitstart IS NULL "+
 			"FROM pg_stat_activity b JOIN pg_stat_activity c ON c.pid = ANY(pg_blocking_pids(b.pid)) "+
+			"LEFT JOIN LATERAL (SELECT MIN((to_jsonb(l)->>'waitstart')::timestamptz) AS waitstart "+
+			"FROM pg_locks l WHERE l.pid = b.pid AND NOT l.granted) w ON true "+
 			"WHERE b.pid <> pg_backend_pid() "+
 			"ORDER BY 6 DESC, 1 ASC")
 	if err != nil {
@@ -160,7 +162,7 @@ func (c *Collector) Locks(ctx context.Context, maxQueryLen int) ([]model.Blockin
 	for rows.Next() {
 		var p model.BlockingPair
 		if err := rows.Scan(&p.BlockedPID, &p.BlockedUser, &p.BlockingPID, &p.BlockingUser, &p.Database,
-			&p.WaitSeconds, &p.BlockedState, &p.BlockingState, &p.BlockedQuery, &p.BlockingQuery); err != nil {
+			&p.WaitSeconds, &p.BlockedState, &p.BlockingState, &p.BlockedQuery, &p.BlockingQuery, &p.WaitUnknown); err != nil {
 			return nil, err
 		}
 		p.BlockedQuery = c.trim(p.BlockedQuery, maxQueryLen)
@@ -182,8 +184,13 @@ func (c *Collector) Replication(ctx context.Context) (model.Replication, error) 
 	if inRecovery {
 		r.Role = "standby"
 		if err := c.q.QueryRow(ctx,
-			"SELECT COALESCE(EXTRACT(EPOCH FROM (now() - pg_last_xact_replay_timestamp())), 0)",
-			nil, &r.LocalReplayLagSeconds); err != nil {
+			"SELECT streaming AND NOT paused AND received IS NOT NULL AND replayed IS NOT NULL "+
+				"AND (received = replayed OR replayed_at IS NOT NULL), "+
+				"CASE WHEN received = replayed THEN 0 ELSE COALESCE(EXTRACT(EPOCH FROM (now() - replayed_at)), 0) END "+
+				"FROM (SELECT pg_last_wal_receive_lsn() AS received, pg_last_wal_replay_lsn() AS replayed, "+
+				"pg_last_xact_replay_timestamp() AS replayed_at, pg_is_wal_replay_paused() AS paused, "+
+				"EXISTS (SELECT 1 FROM pg_stat_wal_receiver WHERE status = 'streaming') AS streaming) s",
+			nil, &r.LocalReplayLagKnown, &r.LocalReplayLagSeconds); err != nil {
 			return r, err
 		}
 		return r, nil
@@ -191,7 +198,7 @@ func (c *Collector) Replication(ctx context.Context) (model.Replication, error) 
 	r.Role = "primary"
 	rows, err := c.q.Query(ctx,
 		"SELECT COALESCE(application_name, ''), COALESCE(client_addr::text, ''), "+
-			"COALESCE(state, ''), COALESCE(sync_state, ''), "+
+			"COALESCE(state, ''), COALESCE(sync_state, ''), replay_lag IS NOT NULL, "+
 			"COALESCE(EXTRACT(EPOCH FROM replay_lag), 0) "+
 			"FROM pg_stat_replication ORDER BY 1 ASC")
 	if err != nil {
@@ -201,7 +208,7 @@ func (c *Collector) Replication(ctx context.Context) (model.Replication, error) 
 	for rows.Next() {
 		var rep model.Replica
 		if err := rows.Scan(&rep.ApplicationName, &rep.ClientAddr, &rep.State, &rep.SyncState,
-			&rep.ReplayLagSeconds); err != nil {
+			&rep.ReplayLagKnown, &rep.ReplayLagSeconds); err != nil {
 			return r, err
 		}
 		r.Replicas = append(r.Replicas, rep)
@@ -215,8 +222,8 @@ func (c *Collector) Replication(ctx context.Context) (model.Replication, error) 
 // read is reported as unknown instead of failing the whole listing.
 func (c *Collector) Databases(ctx context.Context) ([]model.DatabaseInfo, error) {
 	rows, err := c.q.Query(ctx,
-		"SELECT d.datname, pg_get_userbyid(d.datdba), COUNT(s.datid) "+
-			"FROM pg_database d LEFT JOIN pg_stat_database s ON s.datid = d.oid "+
+		"SELECT d.datname, pg_get_userbyid(d.datdba), COUNT(a.pid) "+
+			"FROM pg_database d LEFT JOIN pg_stat_activity a ON a.datid = d.oid AND a.pid <> pg_backend_pid() "+
 			"WHERE NOT d.datistemplate GROUP BY d.datname, d.datdba ORDER BY d.datname")
 	if err != nil {
 		return nil, err
@@ -428,7 +435,7 @@ func (c *Collector) Cache(ctx context.Context, topTablesLimit int) (model.CacheR
 }
 
 // TopQueries inspects pg_stat_statements for performance bottlenecks.
-func (c *Collector) TopQueries(ctx context.Context, limit int) (model.TopQueriesReport, error) {
+func (c *Collector) TopQueries(ctx context.Context, limit, maxQueryLen int) (model.TopQueriesReport, error) {
 	var rep model.TopQueriesReport
 	if limit <= 0 {
 		limit = 10
@@ -493,7 +500,7 @@ func (c *Collector) TopQueries(ctx context.Context, limit int) (model.TopQueries
 		); err != nil {
 			return rep, err
 		}
-		q.Query = c.trim(q.Query, 200)
+		q.Query = c.trim(q.Query, maxQueryLen)
 		rep.Queries = append(rep.Queries, q)
 	}
 	return rep, rows.Err()
@@ -591,39 +598,45 @@ func (c *Collector) WAL(ctx context.Context, versionNum int) (model.WALReport, e
 			"'fsync', 'synchronous_commit', 'full_page_writes', 'wal_sync_method', "+
 			"'synchronous_standby_names', 'track_io_timing', 'checkpoint_timeout', "+
 			"'max_wal_size', 'min_wal_size', 'checkpoint_completion_target')")
-	if err == nil {
-		defer settingsRows.Close()
-		for settingsRows.Next() {
-			var k, v string
-			if err := settingsRows.Scan(&k, &v); err == nil {
-				switch k {
-				case "fsync":
-					rep.Settings.Fsync = v
-				case "synchronous_commit":
-					rep.Settings.SynchronousCommit = v
-				case "full_page_writes":
-					rep.Settings.FullPageWrites = v
-				case "wal_sync_method":
-					rep.Settings.WALSyncMethod = v
-				case "synchronous_standby_names":
-					rep.Settings.SynchronousStandbyNames = v
-				case "track_io_timing":
-					rep.Settings.TrackIOTiming = v
-				case "checkpoint_timeout":
-					rep.Settings.CheckpointTimeout = v
-				case "max_wal_size":
-					rep.Settings.MaxWALSize = v
-				case "min_wal_size":
-					rep.Settings.MinWALSize = v
-				case "checkpoint_completion_target":
-					rep.Settings.CheckpointCompletionTarget = v
-				}
+	if err != nil {
+		return rep, err
+	}
+	defer settingsRows.Close()
+	for settingsRows.Next() {
+		var k, v string
+		if err := settingsRows.Scan(&k, &v); err != nil {
+			return rep, err
+		} else {
+			switch k {
+			case "fsync":
+				rep.Settings.Fsync = v
+			case "synchronous_commit":
+				rep.Settings.SynchronousCommit = v
+			case "full_page_writes":
+				rep.Settings.FullPageWrites = v
+			case "wal_sync_method":
+				rep.Settings.WALSyncMethod = v
+			case "synchronous_standby_names":
+				rep.Settings.SynchronousStandbyNames = v
+			case "track_io_timing":
+				rep.Settings.TrackIOTiming = v
+			case "checkpoint_timeout":
+				rep.Settings.CheckpointTimeout = v
+			case "max_wal_size":
+				rep.Settings.MaxWALSize = v
+			case "min_wal_size":
+				rep.Settings.MinWALSize = v
+			case "checkpoint_completion_target":
+				rep.Settings.CheckpointCompletionTarget = v
 			}
 		}
 	}
+	if err := settingsRows.Err(); err != nil {
+		return rep, err
+	}
 
 	// 2. WAL metrics from pg_stat_wal (available in PostgreSQL 14+)
-	_ = c.q.QueryRow(ctx,
+	if err := c.q.QueryRow(ctx,
 		"SELECT COALESCE(wal_records, 0)::bigint, COALESCE(wal_fpi, 0)::bigint, "+
 			"COALESCE(wal_bytes, 0)::bigint, COALESCE(wal_buffers_full, 0)::bigint, "+
 			"COALESCE(wal_write, 0)::bigint, COALESCE(wal_sync, 0)::bigint, "+
@@ -632,11 +645,13 @@ func (c *Collector) WAL(ctx context.Context, versionNum int) (model.WALReport, e
 			"FROM pg_stat_wal", nil,
 		&rep.WAL.Records, &rep.WAL.FPI, &rep.WAL.Bytes, &rep.WAL.BuffersFull,
 		&rep.WAL.WriteCount, &rep.WAL.SyncCount, &rep.WAL.WriteTimeMs, &rep.WAL.SyncTimeMs,
-		&rep.WAL.StatsReset)
+		&rep.WAL.StatsReset); err != nil {
+		return rep, err
+	}
 
 	// 3. Checkpoint metrics: PG17 moved checkpoint counters to pg_stat_checkpointer
 	if versionNum >= 170000 {
-		_ = c.q.QueryRow(ctx,
+		err = c.q.QueryRow(ctx,
 			"SELECT COALESCE(num_timed, 0)::bigint, COALESCE(num_requested, 0)::bigint, "+
 				"COALESCE(write_time, 0)::float8, COALESCE(sync_time, 0)::float8, "+
 				"COALESCE(buffers_written, 0)::bigint, "+
@@ -646,7 +661,7 @@ func (c *Collector) WAL(ctx context.Context, versionNum int) (model.WALReport, e
 			&rep.Checkpoint.WriteTimeMs, &rep.Checkpoint.SyncTimeMs,
 			&rep.Checkpoint.BuffersCheckpoint, &rep.Checkpoint.StatsReset)
 	} else {
-		_ = c.q.QueryRow(ctx,
+		err = c.q.QueryRow(ctx,
 			"SELECT COALESCE(checkpoints_timed, 0)::bigint, COALESCE(checkpoints_req, 0)::bigint, "+
 				"COALESCE(checkpoint_write_time, 0)::float8, COALESCE(checkpoint_sync_time, 0)::float8, "+
 				"COALESCE(buffers_checkpoint, 0)::bigint, "+
@@ -656,7 +671,9 @@ func (c *Collector) WAL(ctx context.Context, versionNum int) (model.WALReport, e
 			&rep.Checkpoint.WriteTimeMs, &rep.Checkpoint.SyncTimeMs,
 			&rep.Checkpoint.BuffersCheckpoint, &rep.Checkpoint.StatsReset)
 	}
+	if err != nil {
+		return rep, err
+	}
 
 	return rep, nil
 }
-

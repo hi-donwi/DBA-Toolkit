@@ -24,19 +24,25 @@ func EvaluateReplication(r model.Replication, t Thresholds) []model.Finding {
 	case r.Role == "primary":
 		for _, rep := range r.Replicas {
 			out = append(out, replicaLagFinding("REPL-002",
-				rep.ApplicationName, rep.ReplayLagSeconds, t,
+				rep.ApplicationName, rep.ReplayLagKnown, rep.ReplayLagSeconds, rep.State, t,
 				fmt.Sprintf("Standby %q (state %s, sync %s)", rep.ApplicationName, rep.State, rep.SyncState)))
 		}
 	default: // standby
 		out = append(out, replicaLagFinding("REPL-002",
-			"local", r.LocalReplayLagSeconds, t, "Local WAL replay on this standby"))
+			"local", r.LocalReplayLagKnown, r.LocalReplayLagSeconds, "streaming", t,
+			"Local WAL replay on this standby"))
 	}
 	return out
 }
 
 // replicaLagFinding scores one lag measurement against warn/crit boundaries,
 // reporting PASS when the lag is below both.
-func replicaLagFinding(id, name string, lagSeconds float64, t Thresholds, evidence string) model.Finding {
+func replicaLagFinding(id, name string, known bool, lagSeconds float64, state string, t Thresholds, evidence string) model.Finding {
+	if !known || (state != "" && state != "streaming") {
+		return finding(id, model.SeverityWarning, "Replica replay lag unknown",
+			fmt.Sprintf("Replica %q has no trustworthy replay lag (state %s)", name, state),
+			WithEvidence(evidence), WithMetadata("lag_known", "false"))
+	}
 	lag := time.Duration(lagSeconds * float64(time.Second))
 	lagTxt := fmtDur(lagSeconds)
 	switch {

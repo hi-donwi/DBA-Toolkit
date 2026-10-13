@@ -11,14 +11,12 @@ import (
 // EvaluateLongQueries flags sessions that have been running at or above the
 // threshold. Empty sessions produce a PASS finding.
 func EvaluateLongQueries(sessions []model.Session, threshold time.Duration) []model.Finding {
-	if len(sessions) == 0 {
-		return []model.Finding{
-			finding("LONGQ-001", model.SeverityPass, "Long-running queries",
-				fmt.Sprintf("No queries running longer than %s", threshold)),
-		}
-	}
 	out := make([]model.Finding, 0, len(sessions))
+	limit := threshold.Seconds()
 	for _, s := range sessions {
+		if s.DurationSeconds < limit || (s.State != "active" && s.State != "idle in transaction" && s.State != "idle in transaction (aborted)") {
+			continue
+		}
 		m := map[string]string{
 			"pid":      fmt.Sprintf("%d", s.PID),
 			"database": s.Database,
@@ -40,6 +38,12 @@ func EvaluateLongQueries(sessions []model.Session, threshold time.Duration) []mo
 		out = append(out, finding("LONGQ-001", model.SeverityWarning, "Long-running query detected",
 			fmt.Sprintf("Query on PID %d has been running for %s", s.PID, fmtDur(s.DurationSeconds)),
 			opts...))
+	}
+	if len(out) == 0 {
+		return []model.Finding{
+			finding("LONGQ-001", model.SeverityPass, "Long-running queries",
+				fmt.Sprintf("No queries running longer than %s", threshold)),
+		}
 	}
 	return out
 }
