@@ -75,4 +75,3 @@ func (d TopData) health() model.Health             { return d.Snapshot.Health }
 type WALData struct {
 	WAL model.WALReport `json:"wal"`
 }
-
