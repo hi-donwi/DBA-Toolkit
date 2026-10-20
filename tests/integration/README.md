@@ -45,6 +45,13 @@ file).
 - The binary is built once per suite run with `-tags integration`.
 - A streaming, caught-up standby reports known lag even when the primary is idle.
 - Subprocesses discard inherited `DBAKIT_DB_*` and libpq settings, including URLs.
+- All diagnostic commands also run under a non-administrator `pg_monitor` role
+  with `default_transaction_read_only=on`; passwords must not appear in output.
+- A real blocked update is reported without cancelling the waiter or releasing
+  its blocker. Fixture setup and teardown, not dbakit, perform those writes.
+
+Set `POSTGRES_IMAGE` to a PostgreSQL 16 or 17 image digest to run the same suite
+against an immutable server image.
 
 Fixture bootstrap creates a replication connection and copies the synthetic
 database with `pg_basebackup`. The dbakit binary itself stays read-only. These
